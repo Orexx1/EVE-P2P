@@ -1,0 +1,28 @@
+{
+  "name": "eve-p2p",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Peer-to-peer EVE Online duel sandbox: two players, one room code, real fits.",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "scripts": {
+    "sync-sde": "node scripts/sync-sde.mjs",
+    "predev": "node scripts/sync-sde.mjs",
+    "dev": "vite",
+    "prebuild": "node scripts/sync-sde.mjs",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "pretest": "node scripts/sync-sde.mjs",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fontsource/saira-semi-condensed": "^5.3.0",
+    "eve-fit-engine": "^0.2.23"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.0"
+  }
+}

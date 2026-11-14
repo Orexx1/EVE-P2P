@@ -1,0 +1,69 @@
+// Starter fits so a new visitor can see the tool work before pasting their own.
+export const SAMPLE_FITS: Array<{ label: string; eft: string }> = [
+  {
+    label: 'Rifter',
+    eft: `[Rifter, Autocannon brawler]
+Damage Control II
+Small Armor Repairer II
+200mm Steel Plates II
+Gyrostabilizer II
+
+1MN Afterburner II
+Initiated Compact Warp Scrambler
+X5 Enduring Stasis Webifier
+
+150mm Light AutoCannon II, Republic Fleet EMP S
+150mm Light AutoCannon II, Republic Fleet EMP S
+150mm Light AutoCannon II, Republic Fleet EMP S
+
+Small Projectile Burst Aerator I
+Small Explosive Armor Reinforcer I
+Small Auxiliary Nano Pump I`,
+  },
+  {
+    label: 'Merlin',
+    eft: `[Merlin, Blaster brawler]
+Damage Control II
+Magnetic Field Stabilizer II
+Micro Auxiliary Power Core I
+
+1MN Afterburner II
+Initiated Compact Warp Scrambler
+X5 Enduring Stasis Webifier
+Medium Azeotropic Restrained Shield Extender
+
+Light Neutron Blaster II, Void S
+Light Neutron Blaster II, Void S
+Light Neutron Blaster II, Void S
+
+Small Hybrid Burst Aerator I
+Small EM Shield Reinforcer I
+Small Thermal Shield Reinforcer I`,
+  },
+  {
+    label: 'Caracal',
+    eft: `[Caracal, Rapid light kiter]
+Damage Control II
+Ballistic Control System II
+Ballistic Control System II
+Nanofiber Internal Structure II
+
+50MN Microwarpdrive II
+Large Shield Extender II
+Large Shield Extender II
+Warp Disruptor II
+Multispectrum Shield Hardener II
+
+Rapid Light Missile Launcher II, Scourge Fury Light Missile
+Rapid Light Missile Launcher II, Scourge Fury Light Missile
+Rapid Light Missile Launcher II, Scourge Fury Light Missile
+Rapid Light Missile Launcher II, Scourge Fury Light Missile
+Rapid Light Missile Launcher II, Scourge Fury Light Missile
+
+Medium Core Defense Field Extender I
+Medium Core Defense Field Extender I
+Medium Ionic Field Projector I
+
+Warrior II x2`,
+  },
+]
