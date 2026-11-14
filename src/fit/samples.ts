@@ -66,4 +66,64 @@ Medium Ionic Field Projector I
 
 Warrior II x2`,
   },
+  {
+    label: 'Vexor',
+    eft: `[Vexor, Drone brawler]
+Drone Damage Amplifier II
+Drone Damage Amplifier II
+Damage Control II
+Medium Armor Repairer II
+Multispectrum Energized Membrane II
+
+10MN Afterburner II
+Warp Scrambler II
+Stasis Webifier II
+Medium Capacitor Booster II, Navy Cap Booster 800
+
+Heavy Electron Blaster II, Void M
+Heavy Electron Blaster II, Void M
+Heavy Electron Blaster II, Void M
+Heavy Electron Blaster II, Void M
+
+Medium Auxiliary Nano Pump I
+Medium Auxiliary Nano Pump I
+Medium Nanobot Accelerator I
+
+Hammerhead II x5
+Hobgoblin II x5
+Warrior II x5`,
+  },
+  {
+    label: 'Vendetta',
+    eft: `[Vendetta, Armor brawler]
+Damage Control II
+Drone Damage Amplifier II
+Drone Damage Amplifier II
+Drone Damage Amplifier II
+Capital Armor Repairer II
+Multispectrum Energized Membrane II
+Multispectrum Energized Membrane II
+
+10000MN Afterburner II
+Capital Capacitor Booster II, Navy Cap Booster 3200
+Omnidirectional Tracking Link II
+Sensor Booster II
+Heavy Stasis Grappler II
+
+Fighter Support Unit II
+Fighter Support Unit II
+Heavy Energy Neutralizer II
+Heavy Energy Neutralizer II
+Heavy Energy Neutralizer II
+Heavy Energy Neutralizer II
+Stasis Webification Burst Projector
+
+Capital Trimark Armor Pump II
+Capital Trimark Armor Pump II
+Capital Trimark Armor Pump II
+
+
+Firbolg II x18
+Cyclops II x12`,
+  },
 ]

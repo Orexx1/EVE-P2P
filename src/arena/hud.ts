@@ -6,8 +6,24 @@
 // One ship is "selected" at a time (tap its bracket or its overview row): the
 // selected item's buttons act on it. Locked targets appear as cards at the
 // top; the highlighted card is the one modules are pointed at when switched on.
-import type { Result, Session } from '../game/session'
-import { LOCK_LOCKED, LOCK_LOCKING, LOCK_NONE, QUALITY, lockState, type Command, type CombatEvent, type ModuleStats } from '../sim/combat'
+//
+// A ship that carries drones or fighters gets a drone window on the left:
+// every drone and squadron as a tile showing where it is and what shape it is
+// in, and the orders to give them. Tap tiles to pick which ones an order goes
+// to; with none picked it goes to all of them.
+import type { CraftView, Result, Session } from '../game/session'
+import {
+  LOCK_LOCKED,
+  LOCK_LOCKING,
+  LOCK_NONE,
+  QUALITY,
+  lockState,
+  type AbilityStats,
+  type Command,
+  type CombatEvent,
+  type CraftStats,
+  type ModuleStats,
+} from '../sim/combat'
 import { dist, len } from '../sim/vec'
 import { describeOrder, formatRange, type Order, type ShipState } from '../sim/world'
 import { esc, int } from '../ui/format'
@@ -60,6 +76,87 @@ function moduleButton(m: ModuleStats, index: number): string {
     </button>`
 }
 
+const icon = (typeID: number) => `<img src="https://images.evetech.net/types/${typeID}/icon?size=64" alt="" loading="lazy" draggable="false" />`
+const BARS = '<span class="bars"><span class="bar shield"><span></span></span><span class="bar armor"><span></span></span><span class="bar hull"><span></span></span></span>'
+
+/** What an ability button says: short enough for a row of them beside a squadron. */
+const ABILITY_LABEL: Record<string, string> = {
+  Attack: 'Guns',
+  'Heavy rocket salvo': 'Rockets',
+  'Torpedo salvo': 'Torps',
+  'Missile salvo': 'Salvo',
+  'Micro missile swarm': 'Swarm',
+  Microwarpdrive: 'MWD',
+  Afterburner: 'AB',
+  'Evasive maneuvers': 'Evade',
+  'Energy neutralizer': 'Neut',
+  'Stasis webifier': 'Web',
+  'Warp disruptor': 'Point',
+}
+
+function describeAbility(a: AbilityStats): string {
+  const parts = [a.name]
+  if (a.kind === 'speed') parts.push(`${a.cycle.toFixed(0)} s burst`, `${a.cooldown.toFixed(0)} s cooldown`)
+  else {
+    parts.push(`every ${a.cycle.toFixed(1)} s`, a.falloff > 0 ? `${formatRange(a.range)} + ${formatRange(a.falloff)}` : formatRange(a.range))
+    if (a.charges > 0) parts.push(`${a.charges} volleys, rearmed in the tube`)
+    if (a.vsShips < 1) parts.push('made for drones and fighters')
+    if (a.craftOnly) parts.push('drones and fighters only')
+  }
+  return parts.join(', ')
+}
+
+/** The drone window, built once. Drones of one type share a heading; every squadron gets a row with its abilities. */
+function craftPanel(stats: CraftStats[], groups: number[][]): string {
+  if (!stats.length) return ''
+  const drones = stats.some((c) => c.kind === 'drone')
+  const fighters = stats.some((c) => c.kind === 'fighter')
+  const tile = (n: number, body = '') => `
+    <button type="button" class="craft-tile${body ? ' wide' : ''}" data-tile="${n}" aria-pressed="false" aria-label="${esc(stats[n].name)}" title="${esc(stats[n].note || stats[n].name)}">
+      <span class="craft-icon">${icon(stats[n].typeID)}</span>${body}${BARS}
+    </button>`
+  const rows = groups
+    .map((members, g) => {
+      const first = stats[members[0]]
+      if (first.kind === 'drone') {
+        return `
+        <li class="craft-group">
+          <button type="button" class="craft-type" data-group="${g}"><span>${esc(first.name)}</span><span class="sub" data-group-sub></span></button>
+          <div class="craft-tiles">${members.map((n) => tile(n)).join('')}</div>
+        </li>`
+      }
+      const n = members[0]
+      return `
+        <li class="squadron">
+          ${tile(n, `<span class="squad-name">${esc(first.name)} <b data-squad-count></b></span><span class="sub" data-squad-state></span>`)}
+          <span class="abilities">${first.abilities
+            .map((a, k) => `<button type="button" class="ability ${a.kind}" data-ability="${n}:${k}" aria-pressed="false" title="${esc(describeAbility(a))}"></button>`)
+            .join('')}</span>
+        </li>`
+    })
+    .join('')
+  return `
+      <section class="craft panel${fighters ? ' with-squadrons' : ''}" data-el="craft" aria-label="${drones && fighters ? 'Drones and fighters' : fighters ? 'Fighters' : 'Drones'}" hidden>
+        <div class="craft-orders" role="group" aria-label="Orders">
+          <button type="button" data-craft="launch">Launch</button>
+          <button type="button" class="primary" data-craft="engage" title="Attack your active target">Engage</button>
+          <button type="button" data-craft="orbit" title="Break off and circle your ship">Orbit</button>
+          ${fighters ? '<button type="button" data-craft="goto" title="Send squadrons to hold beside the selected item">Go to</button>' : ''}
+          <button type="button" data-craft="recall" title="Return and dock">Recall</button>
+        </div>
+        ${
+          drones
+            ? `<div class="craft-settings">
+          <button type="button" data-craft="stance" data-el="stance" aria-pressed="true" title="Drones attack whoever attacks your ship">Aggressive</button>
+          <button type="button" data-craft="focus" data-el="focus" aria-pressed="true" title="Drones that choose their own target all choose the same one">Focus fire</button>
+        </div>`
+            : ''
+        }
+        <p class="sub craft-use" data-el="craftUse"></p>
+        <ul class="craft-list" data-el="craftList">${rows}</ul>
+      </section>`
+}
+
 /** What the fight is still waiting for before it starts. */
 export type LoadState = ({ mode: 'models' } & ModelProgress) | { mode: 'simple'; why?: string }
 
@@ -91,19 +188,35 @@ export class Hud {
     this.stopGraphics?.()
   }
 
-  /** The ship the selected-item buttons act on. */
+  /** The ship, drone or squadron the selected-item buttons act on. */
   private selected: number
   private brackets: HTMLButtonElement[] = []
   private rows: HTMLElement[] = []
+  /** The pilot's own drones and squadrons picked to take the next order, as positions in `session.myCraft`. */
+  private picked = new Set<number>()
+  /** Which of them share a heading in the drone window. */
+  private groups: number[][] = []
+  private tiles: HTMLButtonElement[] = []
+  private abilities: HTMLButtonElement[][] = []
+  private handlers: HudHandlers
   private targetsKey = ''
   private orderButtons: Record<string, HTMLElement | null> = {}
 
   constructor(private session: Session, handlers: HudHandlers) {
+    this.handlers = handlers
     const me = session.players[session.me]
     const rack = session.rack
-    const others = session.players.map((_, i) => i).filter((i) => i !== session.me)
-    const side = (i: number) => (session.players[i].team === session.myTeam ? 'ally' : 'enemy')
+    const entities = session.entities
+    const side = (i: number) => (entities[i].team === session.myTeam ? 'ally' : 'enemy')
+    // Everything the pilot can select: the other ships, and the enemy's drones and squadrons.
+    const others = entities.map((_, i) => i).filter((i) => i !== session.me && (entities[i].kind === 'ship' || side(i) === 'enemy'))
     this.selected = others.find((i) => side(i) === 'enemy') ?? others[0]
+    // Drones of the same type, next to each other in the bay, share a heading; a squadron stands alone.
+    session.craftStats.forEach((craft, n) => {
+      const last = this.groups.at(-1)
+      if (craft.kind === 'drone' && last && session.craftStats[last[0]].kind === 'drone' && session.craftStats[last[0]].typeID === craft.typeID) last.push(n)
+      else this.groups.push([n])
+    })
     const rows = SLOT_ROWS.map(([slot, label]) => {
       const buttons = rack.map((m, i) => (m.slot === slot ? moduleButton(m, i) : '')).join('')
       return buttons ? `<div class="rack-row" role="group" aria-label="${label}">${buttons}</div>` : ''
@@ -134,7 +247,7 @@ export class Hud {
       ${others
         .map(
           (i) => `
-      <button type="button" class="bracket ${side(i)}" data-ship="${i}" data-bracket aria-label="Select ${esc(session.players[i].pilot)}">
+      <button type="button" class="bracket ${side(i)}${entities[i].kind === 'ship' ? '' : ' small'}" data-ship="${i}" data-bracket aria-label="Select ${esc(entities[i].name)}">
         <span class="bracket-mark"></span>
         <span class="bracket-label"></span>
       </button>`,
@@ -167,8 +280,8 @@ export class Hud {
               ${others
                 .map(
                   (i) => `
-              <tr class="${side(i)}" data-ship="${i}" data-row>
-                <td>${esc(session.players[i].pilot)}</td><td class="num"></td><td class="num"></td>
+              <tr class="${side(i)}${entities[i].kind === 'ship' ? '' : ' small'}" data-ship="${i}" data-row${entities[i].kind === 'ship' ? '' : ' hidden'}>
+                <td>${esc(entities[i].name)}</td><td class="num"></td><td class="num"></td>
               </tr>`,
                 )
                 .join('')}
@@ -176,6 +289,8 @@ export class Hud {
           </table>
         </section>
       </aside>
+
+      ${craftPanel(session.craftStats, this.groups)}
 
       <ol class="combat-log" data-el="log" aria-label="Combat log" aria-live="off"></ol>
 
@@ -198,7 +313,6 @@ export class Hud {
           </section>
           <section class="rack" aria-label="Modules">
             ${rows}
-            ${session.hasDrones ? '<button type="button" class="drones" data-act="drones" data-el="drones">Launch drones</button>' : ''}
           </section>
         </div>
       </div>
@@ -215,8 +329,16 @@ export class Hud {
     this.root.querySelectorAll<HTMLButtonElement>('[data-bracket]').forEach((node) => (this.brackets[Number(node.dataset.ship)] = node))
     this.root.querySelectorAll<HTMLElement>('[data-row]').forEach((node) => (this.rows[Number(node.dataset.ship)] = node))
     for (const act of ['approach', 'orbit', 'keep']) this.orderButtons[act] = this.root.querySelector<HTMLElement>(`[data-act="${act}"]`)
-    // The icon covers the short name; if CCP's image server cannot be reached the name shows instead.
-    this.root.querySelectorAll<HTMLImageElement>('.mod img').forEach((img) => img.addEventListener('error', () => img.remove()))
+    this.root.querySelectorAll<HTMLButtonElement>('[data-tile]').forEach((node) => (this.tiles[Number(node.dataset.tile)] = node))
+    this.root.querySelectorAll<HTMLButtonElement>('[data-ability]').forEach((node) => {
+      const [n, k] = node.dataset.ability!.split(':').map(Number)
+      ;(this.abilities[n] ??= [])[k] = node
+    })
+    this.root.classList.toggle('wide-rack', SLOT_ROWS.some(([slot]) => rack.filter((m) => m.slot === slot).length > 6))
+    this.root.classList.toggle('has-craft', session.craftStats.length > 0)
+    this.root.classList.toggle('has-squadrons', session.craftStats.some((c) => c.kind === 'fighter'))
+    // The icon covers the short name; if the image server cannot be reached the name shows instead.
+    this.root.querySelectorAll<HTMLImageElement>('.mod img, .craft-icon img').forEach((img) => img.addEventListener('error', () => img.remove()))
 
     this.root.addEventListener('click', (event) => {
       const target = event.target as HTMLElement
@@ -224,6 +346,31 @@ export class Hud {
       if (mod !== undefined) {
         const run = session.own.modules[Number(mod)]
         if (run) handlers.command({ c: 'mod', i: Number(mod), on: !run.wanted })
+        return
+      }
+      // The drone window: pick tiles, pick a whole type, use an ability, give an order.
+      const tile = target.closest<HTMLElement>('[data-tile]')?.dataset.tile
+      const group = target.closest<HTMLElement>('[data-group]')?.dataset.group
+      const ability = target.closest<HTMLElement>('[data-ability]')?.dataset.ability
+      const craftOrder = target.closest<HTMLElement>('[data-craft]')?.dataset.craft
+      if (ability !== undefined) {
+        const [n, k] = ability.split(':').map(Number)
+        this.useAbility(n, k)
+      } else if (tile !== undefined) {
+        const n = Number(tile)
+        if (!this.picked.delete(n)) this.picked.add(n)
+      } else if (group !== undefined) {
+        const members = this.groups[Number(group)] ?? []
+        const all = members.every((n) => this.picked.has(n))
+        for (const n of members) {
+          if (all) this.picked.delete(n)
+          else this.picked.add(n)
+        }
+      } else if (craftOrder !== undefined) {
+        this.orderCraft(craftOrder)
+      }
+      if (ability !== undefined || tile !== undefined || group !== undefined || craftOrder !== undefined) {
+        this.lastText = 0
         return
       }
       // A locked target's card: point modules at it, and select it.
@@ -252,7 +399,6 @@ export class Hud {
       if (act === 'keep') handlers.order({ kind: 'keep', target: on, range: range('keepRange') })
       if (act === 'stop') handlers.order({ kind: 'stop' })
       if (act === 'lock') handlers.command({ c: lockState(session.own, on) === LOCK_NONE ? 'lock' : 'unlock', t: on })
-      if (act === 'drones') handlers.command({ c: 'drones', on: session.own.drones.state === 'bay' })
       if (act === 'leave') handlers.leave()
       if (act === 'fullscreen') void this.fullscreen()
       if (act === 'graphics') {
@@ -351,7 +497,9 @@ export class Hud {
   report(events: CombatEvent[]) {
     if (!events.length) return
     const me = this.session.me
-    const players = this.session.players
+    const entities = this.session.entities
+    // What the pilot's drones and fighters do, and what is done to them, is the pilot's business.
+    const mineIs = (i: number) => i === me || entities[i]?.owner === me
     let changed = false
     const push = (text: string, cls: string) => {
       this.push(text, cls)
@@ -361,19 +509,32 @@ export class Hud {
       if (event.t === 'note') {
         push(event.text, 'note')
       } else if (event.t === 'dead') {
-        push(event.who === me ? 'Your ship has been destroyed.' : `${players[event.who].pilot} destroyed.`, 'note')
-      } else if (event.from !== me && event.to !== me) {
+        const who = entities[event.who]
+        if (!who) continue
+        if (who.kind !== 'ship') {
+          // A drone or squadron lost: only its owner and whoever was near enough to care are told.
+          if (who.owner === me) push(`Your ${who.name} ${who.kind === 'fighter' ? 'squadron ' : ''}has been destroyed.`, 'note')
+          else if (who.team !== this.session.myTeam) push(`${who.name} destroyed.`, 'note')
+        } else {
+          push(event.who === me ? 'Your ship has been destroyed.' : `${who.name} destroyed.`, 'note')
+        }
+      } else if (!mineIs(event.from) && !mineIs(event.to)) {
         continue
       } else if (event.t === 'fire' && event.weapon === 'missile') {
         if (event.quality === 0) push(event.from === me ? `Your ${event.name} cannot reach the target.` : `${event.name} falls short of you.`, 'miss')
       } else {
-        const mine = event.from === me
+        const mine = mineIs(event.from)
         const missed = event.t === 'fire' && event.quality === 0
         const verb = event.t === 'fire' ? QUALITY[Math.max(0, Math.min(6, event.quality))] : 'hits'
         if (mine) this.dealt += event.damage
-        else this.taken += event.damage
+        else if (event.to === me) this.taken += event.damage
         const amount = missed ? '' : `: ${int(event.damage)}`
-        push(mine ? `Your ${event.name} ${verb}${amount}` : `${event.name} ${verb}${missed ? '' : ' you'}${amount}`, missed ? 'miss' : mine ? 'dealt' : 'taken')
+        // Shots at a drone or squadron name it; shots at a ship need no naming.
+        const at = entities[event.to]?.kind === 'ship' || !entities[event.to] ? '' : ` ${entities[event.to].name}`
+        const text = mine
+          ? `Your ${event.name} ${verb}${at}${amount}`
+          : `${event.name} ${verb}${missed && !at ? '' : at ? ` your${at}` : ' you'}${amount}`
+        push(text, missed ? 'miss' : mine ? 'dealt' : 'taken')
       }
     }
     if (changed) this.el.log.innerHTML = this.log.map((line) => `<li class="${line.cls}">${esc(line.text)}</li>`).join('')
@@ -395,7 +556,143 @@ export class Hud {
     }
   }
 
-  /** Picks something sensible when nothing valid is selected: the nearest living enemy, else any living ship. */
+  /** Sends an order to the picked drones and squadrons, or to all of them when none are picked. */
+  private orderCraft(act: string) {
+    const s = this.session
+    const views = s.own.craft
+    const command = this.handlers.command
+    if (act === 'stance') return command({ c: 'stance', aggressive: !s.own.aggressive })
+    if (act === 'focus') return command({ c: 'focus', on: !s.own.focus })
+    const alive = views.map((_, n) => n).filter((n) => views[n].state !== 'dead')
+    const chosen = alive.filter((n) => this.picked.has(n))
+    const out = alive.filter((n) => views[n].state !== 'bay')
+    const bay = alive.filter((n) => views[n].state === 'bay')
+    let list: number[]
+    if (act === 'launch') {
+      // With nothing picked: as many as the ship can control, in bay order.
+      list = chosen.length ? chosen : this.launchable(bay, out)
+    } else if (act === 'recall') {
+      list = chosen.length ? chosen : out
+    } else if (act === 'goto') {
+      list = (chosen.length ? chosen : out.length ? out : alive).filter((n) => s.craftStats[n].kind === 'fighter')
+    } else {
+      // Engage and orbit launch whatever is still docked, so with nothing out yet they mean everything.
+      list = chosen.length ? chosen : out.length ? out : act === 'engage' ? [...this.launchable(bay, out)] : []
+    }
+    if (!list.length) {
+      this.push(act === 'launch' ? 'Nothing left to launch.' : act === 'goto' ? 'No squadrons to send.' : 'Nothing in space to give that order to.', 'note')
+      this.el.log.innerHTML = this.log.map((line) => `<li class="${line.cls}">${esc(line.text)}</li>`).join('')
+      return
+    }
+    const ids = list.map((n) => s.myCraft[n])
+    if (act === 'goto') command({ c: 'craft', a: 'orbit', ids, t: this.selected })
+    else command({ c: 'craft', a: act as 'launch' | 'engage' | 'orbit' | 'recall', ids })
+  }
+
+  /** The docked drones and squadrons that could all be in space at once, given what is already out. */
+  private launchable(bay: number[], out: number[]): number[] {
+    const s = this.session
+    const drone = (n: number) => s.craftStats[n].kind === 'drone'
+    let count = out.filter(drone).length
+    let bandwidth = out.filter(drone).reduce((sum, n) => sum + s.craftStats[n].bandwidth, 0)
+    return bay.filter((n) => {
+      if (!drone(n)) return s.own.craft[n].refuel <= 0
+      if (count >= s.droneLimits.max || bandwidth + s.craftStats[n].bandwidth > s.droneLimits.bandwidth + 1e-6) return false
+      count++
+      bandwidth += s.craftStats[n].bandwidth
+      return true
+    })
+  }
+
+  /** Arms, rests or fires an ability. If its squadron is picked, every picked squadron with the same ability follows. */
+  private useAbility(n: number, k: number) {
+    const s = this.session
+    const ability = s.craftStats[n]?.abilities[k]
+    const state = s.own.craft[n]?.abilities[k]
+    if (!ability || !state) return
+    const together = this.picked.has(n) ? [...this.picked].filter((m) => s.craftStats[m].abilities[k]?.name === ability.name && s.own.craft[m].state !== 'dead') : [n]
+    this.handlers.command({ c: 'ability', ids: together.map((m) => s.myCraft[m]), k, on: ability.kind === 'speed' ? true : !state.on })
+  }
+
+  /** What a drone or squadron is doing, in a few words. */
+  private doing(view: CraftView, craft: CraftStats): string {
+    const name = (i: number) => this.session.entities[i]?.name ?? ''
+    switch (view.state) {
+      case 'dead':
+        return 'lost'
+      case 'bay':
+        return view.refuel > 0 ? `refuelling, ${Math.ceil(view.refuel)} s` : craft.kind === 'fighter' ? 'in its tube' : 'in the bay'
+      case 'idle':
+        return view.target >= 0 ? `holding at ${name(view.target)}` : 'circling your ship'
+      case 'engage':
+        return `attacking ${name(view.target)}`
+      case 'recall':
+        return 'returning'
+    }
+  }
+
+  /** Brings the drone window up to date. */
+  private drawCraft() {
+    const s = this.session
+    const views = s.own.craft
+    if (!views.length || !this.el.craft) return
+    views.forEach((view, n) => {
+      const tile = this.tiles[n]
+      const craft = s.craftStats[n]
+      if (!tile || !craft) return
+      const dead = view.state === 'dead'
+      if (dead) this.picked.delete(n)
+      tile.className = `craft-tile${craft.kind === 'fighter' ? ' wide' : ''} ${view.state}${this.picked.has(n) ? ' picked' : ''}`
+      tile.disabled = dead
+      tile.setAttribute('aria-pressed', String(this.picked.has(n)))
+      tile.querySelectorAll<HTMLElement>('.bar span').forEach((bar, layer) => (bar.style.width = `${(view.hp[layer] * 100).toFixed(0)}%`))
+      if (craft.kind === 'drone') {
+        tile.title = `${craft.name}, ${this.doing(view, craft)}${craft.note ? `. ${craft.note}` : ''}`
+        return
+      }
+      tile.querySelector('[data-squad-count]')!.textContent = `${view.alive}/${craft.size}`
+      tile.querySelector('[data-squad-state]')!.textContent = this.doing(view, craft)
+      craft.abilities.forEach((a, k) => {
+        const button = this.abilities[n]?.[k]
+        const state = view.abilities[k]
+        if (!button || !state) return
+        const burst = a.kind === 'speed'
+        const spent = a.charges > 0 && state.charges <= 0
+        const short = ABILITY_LABEL[a.name] ?? a.name
+        button.textContent = burst
+          ? state.boost > 0
+            ? `${short} ${Math.ceil(state.boost)}s`
+            : state.cooldown > 0
+              ? `${short} ${Math.ceil(state.cooldown)}s`
+              : short
+          : a.charges > 0
+            ? `${short} ${state.charges}`
+            : short
+        button.classList.toggle('on', burst ? state.boost > 0 : state.on && !spent)
+        button.classList.toggle('waiting', burst ? state.boost <= 0 && state.cooldown > 0 : spent)
+        button.setAttribute('aria-pressed', String(burst ? state.boost > 0 : state.on))
+        button.disabled = dead
+      })
+    })
+    this.groups.forEach((members, g) => {
+      const sub = this.el.craftList.children[g]?.querySelector('[data-group-sub]')
+      if (!sub) return
+      const count = (state: CraftView['state'] | 'out') => members.filter((n) => (state === 'out' ? views[n].state !== 'bay' && views[n].state !== 'dead' : views[n].state === state)).length
+      const parts = [`${count('out')} out`, `${count('bay')} in bay`]
+      if (count('dead')) parts.push(`${count('dead')} lost`)
+      sub.textContent = parts.join(', ')
+    })
+    const drones = views.map((_, n) => n).filter((n) => s.craftStats[n].kind === 'drone')
+    const out = drones.filter((n) => views[n].state !== 'bay' && views[n].state !== 'dead')
+    const use: string[] = []
+    if (drones.length) use.push(`${out.length} of ${s.droneLimits.max} out, ${int(out.reduce((sum, n) => sum + s.craftStats[n].bandwidth, 0))}/${int(s.droneLimits.bandwidth)} Mbit/s`)
+    if (this.picked.size) use.push(`${this.picked.size} picked`)
+    this.el.craftUse.textContent = use.join('. ')
+    this.el.stance?.setAttribute('aria-pressed', String(s.own.aggressive))
+    this.el.focus?.setAttribute('aria-pressed', String(s.own.focus))
+  }
+
+  /** Picks something sensible when nothing valid is selected: the nearest living enemy ship, else any living ship. */
   private reselect(ships: ShipState[]) {
     const s = this.session
     const alive = (i: number) => i !== s.me && !s.sights[i]?.dead
@@ -435,7 +732,7 @@ export class Hud {
     const top = s.players[s.me].spec.maxVelocity
     const rangeTo = (i: number) => formatRange(dist(mine.pos, ships[i].pos))
     const sel = this.selected
-    const chosen = s.players[sel]
+    const chosen = s.entities[sel]
 
     // Every other ship: its bracket and its overview row.
     this.brackets.forEach((bracket, i) => {
@@ -447,6 +744,8 @@ export class Hud {
     })
     this.rows.forEach((row, i) => {
       const dead = !!s.sights[i]?.dead
+      // A drone or squadron is only listed while it is in space.
+      if (s.entities[i].kind !== 'ship') row.hidden = dead
       row.classList.toggle('dead', dead)
       row.classList.toggle('selected', i === sel)
       row.children[1].textContent = dead ? 'destroyed' : rangeTo(i)
@@ -455,8 +754,8 @@ export class Hud {
 
     // Selected item.
     if (chosen) {
-      this.el.selName.textContent = chosen.pilot
-      this.el.selType.textContent = chosen.fit.shipName
+      this.el.selName.textContent = chosen.name
+      this.el.selType.textContent = chosen.type
       this.el.selRange.textContent = rangeTo(sel)
       const lock = lockState(own, sel)
       const left = own.locks.find((l) => l.target === sel)?.left ?? 0
@@ -465,7 +764,7 @@ export class Hud {
 
     this.el.speed.textContent = int(speed)
     this.el.speedBar.style.width = `${top > 0 ? Math.min(100, (speed / top) * 100) : 0}%`
-    const about = 'target' in mine.order && s.players.length > 2 ? `, ${s.players[mine.order.target]?.pilot ?? ''}` : ''
+    const about = 'target' in mine.order && s.entities.length > 2 ? `, ${s.entities[mine.order.target]?.name ?? ''}` : ''
     this.el.order.textContent = describeOrder(mine.order) + about
     const t = Math.floor(s.world.time)
     const clock = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`
@@ -499,12 +798,7 @@ export class Hud {
       if (!run.on) button.style.setProperty('--p', '0')
       this.counts[i].textContent = reloading ? `${Math.ceil(run.reloading)}s` : spec.charges > 0 ? String(run.charges) : ''
     })
-    if (this.el.drones) {
-      const state = own.drones.state
-      this.el.drones.textContent =
-        state === 'bay' ? 'Launch drones' : state === 'outbound' ? 'Drones on their way' : state === 'engaged' ? 'Recall drones' : 'Drones returning'
-      this.el.drones.classList.toggle('on', state === 'engaged' || state === 'outbound')
-    }
+    this.drawCraft()
 
     // Locked targets: a card each. Rebuilt only when the set changes, so a tap is never lost mid-press.
     const key = own.locks.map((l) => `${l.target}${l.left > 0 ? 'x' : ''}`).join(',') + `|${own.active}`
@@ -513,9 +807,9 @@ export class Hud {
       this.el.targets.innerHTML = own.locks
         .map(
           (l) => `
-        <button type="button" class="target ${s.players[l.target].team === s.myTeam ? 'ally' : 'enemy'}${l.target === own.active ? ' active' : ''}" data-target="${l.target}"
-          aria-label="${esc(s.players[l.target].pilot)}${l.target === own.active ? ', active target' : ''}">
-          <span class="target-name">${esc(s.players[l.target].pilot)}</span>
+        <button type="button" class="target ${s.entities[l.target].team === s.myTeam ? 'ally' : 'enemy'}${l.target === own.active ? ' active' : ''}" data-target="${l.target}"
+          aria-label="${esc(s.entities[l.target].name)}${l.target === own.active ? ', active target' : ''}">
+          <span class="target-name">${esc(s.entities[l.target].name)}</span>
           <span class="bars">
             <span class="bar shield"><span></span></span>
             <span class="bar armor"><span></span></span>
@@ -534,6 +828,7 @@ export class Hud {
       ;(card.lastElementChild as HTMLElement).textContent = l.left > 0 ? `Locking ${l.left.toFixed(1)} s` : rangeTo(l.target)
     })
 
+    if (this.el.craft) this.el.craft.hidden = !s.started
     const opponent = s.players[s.them].pilot
     // The start-up screen stays until the fight begins, then fades away.
     if (!s.started) this.drawBoot()

@@ -4,7 +4,7 @@ import type { Session } from '../game/session'
 import { add, scale, type Vec3 } from '../sim/vec'
 import { timeConstant, wantedVelocity, type ShipState } from '../sim/world'
 import { dnaFor } from '../data/models'
-import { FireEffects } from './fx'
+import { FireEffects, SIDE_ALLY, SIDE_ENEMY, SIDE_MINE, type CraftMark } from './fx'
 import { getGraphics, setGraphics } from '../ui/graphics'
 import { Hud } from './hud'
 import { CameraRig, type FightView, type ShipView } from './rig'
@@ -86,7 +86,15 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
     onExit(reason)
   }
 
-  const fx = new FireEffects(root.querySelector<HTMLCanvasElement>('canvas.fx')!, session.me, teams)
+  // Ships come first in the session's list; after them, the drones and fighter squadrons they carry.
+  const shipCount = session.players.length
+  const mine = (i: number) => i === session.me || session.entities[i].owner === session.me
+  const sides = session.entities.map((entity, i) => (mine(i) ? SIDE_MINE : entity.team === session.myTeam ? SIDE_ALLY : SIDE_ENEMY))
+  const fx = new FireEffects(
+    root.querySelector<HTMLCanvasElement>('canvas.fx')!,
+    sides,
+    session.entities.map((entity) => entity.kind !== 'ship'),
+  )
   const hud = new Hud(session, {
     order: (order) => session.order(order),
     command: (command) => session.command(command),
@@ -149,14 +157,15 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
   let frame = 0
   let lastFrame = performance.now()
   /** When each ship blew up, so the hull can vanish inside the fireball. */
-  const diedAt = session.players.map(() => 0)
+  const diedAt = session.entities.map(() => 0)
   const draw = (now: number) => {
     frame = requestAnimationFrame(draw)
     const dt = Math.min((now - lastFrame) / 1000, 0.1)
     lastFrame = now
     if (!rotate.hidden) return
     const ahead = Math.min((now - session.worldAt) / 1000, 0.5)
-    const ships = session.players.map((_, i) => predicted(i, ahead))
+    const all = session.entities.map((_, i) => predicted(i, ahead))
+    const ships = all.slice(0, shipCount)
     const events = session.events.splice(0)
     for (const event of events) if (event.t === 'dead') diedAt[event.who] = now
     const views: ShipView[] = ships.map((ship, i) => {
@@ -166,13 +175,24 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
     })
     rig.update(views)
     view.render(views)
+    // Drones and squadrons have no hull to draw yet: each is a marker where it is in space.
+    const marks: CraftMark[] = []
+    const at = all.map((thing, i) => {
+      if (i < shipCount) return rig.project(i)
+      // One that has just been destroyed keeps its place for a moment, for the flash.
+      if (session.sights[i]?.dead) return diedAt[i] && now - diedAt[i] < 700 ? rig.point(thing.pos) : null
+      const point = rig.point(thing.pos)
+      if (point) {
+        const view = mine(i) ? session.own.craft[session.myCraft.indexOf(i)] : null
+        marks.push({ ...point, side: sides[i], squadron: session.entities[i].kind === 'fighter', hot: view ? view.state === 'engage' : false })
+      }
+      return point
+    })
+    report.craft = marks.length
     fx.add(events)
-    fx.draw(
-      ships.map((_, i) => rig.project(i)),
-      dt,
-    )
+    fx.draw(at, dt, marks)
     hud.report(events)
-    hud.update(ships, (i) => rig.project(i), now)
+    hud.update(all, (i) => at[i], now)
   }
   frame = requestAnimationFrame(draw)
 

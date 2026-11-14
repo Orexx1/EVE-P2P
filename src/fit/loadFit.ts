@@ -43,6 +43,9 @@ export interface LoadedFit {
   fitName: string
   modules: FitLine[]
   drones: DroneLine[]
+  /** Fighter squadrons, one per launch tube, and how many tubes the ship has. */
+  squadrons: Array<{ name: string; count: number }>
+  tubes: number
   problems: FitProblem[]
   /** Display name for any item type id in the game data. */
   nameOf(typeID: number): string
@@ -84,6 +87,7 @@ export function loadFit(eft: string, dataset: FittingDataset): LoadedFit {
   const { fit, warnings } = parsed
   const ship = dataset.getType(fit.shipTypeID)
   if (!ship || !dataset.typesByBucket.ships?.has(fit.shipTypeID)) throw unknownShip()
+  const hangar = loadSquadrons(fit, ship, dataset)
 
   // Start every module in the state it would be in mid-fight: guns, tank and
   // prop mod running. The sim will toggle these per module later.
@@ -104,6 +108,7 @@ export function loadFit(eft: string, dataset: FittingDataset): LoadedFit {
     kind: 'unknown-line',
     message: `Line ${w.line} skipped: "${w.text}" (${w.reason})`,
   }))
+  for (const message of hangar) problems.push({ kind: 'over-limit', message })
   const f = stats.fitting
   const over = (label: string, used: number, max: number, unit: string) => {
     if (used > max + 1e-6) {
@@ -141,9 +146,62 @@ export function loadFit(eft: string, dataset: FittingDataset): LoadedFit {
       charge: mod.chargeTypeID === undefined ? undefined : nameOf(mod.chargeTypeID),
     })),
     drones: fit.drones.map((d) => ({ name: nameOf(d.typeID), total: d.countTotal, active: d.countActive })),
+    squadrons: fit.fighters.map((f) => ({ name: nameOf(f.typeID), count: f.count })),
+    tubes: ship.attributes.find((a) => a.id === ATTR_FIGHTER_TUBES)?.v ?? 0,
     problems,
     nameOf,
   }
+}
+
+const ATTR_FIGHTER_TUBES = 2216
+const ATTR_SQUADRON_SIZE = 2215
+// A fighter is light, support or heavy; a ship has so many tubes for each.
+const FIGHTER_CLASSES = [
+  { label: 'light', is: 2212, slots: 2217 },
+  { label: 'support', is: 2213, slots: 2218 },
+  { label: 'heavy', is: 2214, slots: 2219 },
+]
+
+/**
+ * Pasted fits list fighters like cargo ("Firbolg II x18"). This sorts them
+ * into squadrons, one per launch tube, each as large as that fighter allows,
+ * within the ship's limits for light, support and heavy squadrons.
+ * Returns a message for anything that could not be given a tube.
+ */
+function loadSquadrons(fit: Fit, ship: { attributes: Array<{ id: number; v: number }> }, dataset: FittingDataset): string[] {
+  const fighters = dataset.typesByBucket.fighters
+  const cargo = fit.cargo ?? []
+  if (!fighters || !cargo.some((item) => fighters.has(item.typeID))) return []
+  const of = (type: { attributes: Array<{ id: number; v: number }> }, id: number) => type.attributes.find((a) => a.id === id)?.v ?? 0
+  const tubes = of(ship, ATTR_FIGHTER_TUBES)
+  const used = FIGHTER_CLASSES.map(() => 0)
+  const messages: string[] = []
+  fit.fighters = []
+  for (const item of cargo) {
+    const type = fighters.get(item.typeID)
+    if (!type) continue
+    const kind = FIGHTER_CLASSES.findIndex((c) => of(type, c.is) > 0)
+    const limit = kind < 0 ? tubes : of(ship, FIGHTER_CLASSES[kind].slots)
+    const size = Math.max(1, of(type, ATTR_SQUADRON_SIZE))
+    let left = item.count
+    while (left > 0 && fit.fighters.length < tubes && (kind < 0 || used[kind] < limit)) {
+      const count = Math.min(size, left)
+      fit.fighters.push({ id: `squadron:${fit.fighters.length}`, typeID: item.typeID, count, abilityState: {} })
+      if (kind >= 0) used[kind]++
+      left -= count
+    }
+    if (left > 0) {
+      messages.push(
+        tubes <= 0
+          ? `${type.name}: this ship has no fighter launch tubes.`
+          : kind >= 0 && used[kind] >= limit
+            ? `${left} ${type.name} stay in the hangar: this ship launches ${limit} ${FIGHTER_CLASSES[kind].label} squadron${limit === 1 ? '' : 's'}.`
+            : `${left} ${type.name} stay in the hangar: all ${tubes} launch tubes are in use.`,
+      )
+    }
+  }
+  fit.cargo = cargo.filter((item) => !fighters.has(item.typeID))
+  return messages
 }
 
 const ATTR_SIGNATURE_RADIUS = 552

@@ -1,7 +1,8 @@
 // Weapon fire, drawn on a 2D canvas over whichever 3D view is active: tracers
-// for turret and drone shots, moving dots for missiles, rings where shots land,
-// and a fireball when a ship dies. It only needs to know where the two ships
-// are on screen, so it works the same over stand-in hulls and real models.
+// for turret, drone and fighter shots, moving dots for missiles, rings where
+// shots land, and a fireball when something dies. Drones and fighter squadrons
+// are drawn here too, as small markers. It only needs to know where things are
+// on screen, so it works the same over stand-in hulls and real models.
 import type { CombatEvent } from '../sim/combat'
 
 type Point = { x: number; y: number } | null
@@ -24,16 +25,34 @@ const MINE = '#7dffa8'
 const ALLIES = '#8fd0ff'
 const THEIRS = '#ff7a5c'
 
+/** Whose something is, from where the player sits. */
+export const SIDE_MINE = 0
+export const SIDE_ALLY = 1
+export const SIDE_ENEMY = 2
+const COLOURS = [MINE, ALLIES, THEIRS]
+
+/** A drone or squadron to mark on screen this frame. */
+export interface CraftMark {
+  x: number
+  y: number
+  side: number
+  /** Squadrons are drawn larger than drones. */
+  squadron: boolean
+  /** Attacking something right now. */
+  hot: boolean
+}
+
 export class FireEffects {
   private ctx: CanvasRenderingContext2D
   private effects: Effect[] = []
   private width = 0
   private height = 0
 
+  /** `sides[i]` is whose thing i is (mine, an ally's, the enemy's); `small[i]` is true for drones and squadrons. */
   constructor(
     private canvas: HTMLCanvasElement,
-    private me: number,
-    private teams: number[],
+    private sides: number[],
+    private small: boolean[],
   ) {
     this.ctx = canvas.getContext('2d')!
   }
@@ -60,25 +79,49 @@ export class FireEffects {
           continue
         } else if (event.weapon === 'missile') {
           push('missile', event.from, event.to, event.from, Math.max(event.flight, 0.2), 0)
+        } else if (event.weapon === 'salvo') {
+          // A squadron's rockets or torpedoes: quick to arrive, and they always land.
+          push('missile', event.from, event.to, event.from, 0.35, 0)
+          push('ring', event.to, event.to, event.from, 0.5, 20)
         } else {
           const miss = hit ? 0 : (Math.random() < 0.5 ? -1 : 1) * (14 + Math.random() * 22)
-          push('tracer', event.from, event.to, event.from, event.weapon === 'drone' ? 0.12 : 0.2, miss)
+          push('tracer', event.from, event.to, event.from, event.weapon === 'turret' ? 0.2 : 0.12, miss)
           if (hit) push('ring', event.to, event.to, event.from, 0.28, event.quality >= 5 ? 16 : 9)
         }
       } else if (event.t === 'impact') {
         push('ring', event.to, event.to, event.from, 0.4, 18)
       } else if (event.t === 'dead') {
-        push('blast', event.who, event.who, event.who, 1.8, 0)
+        // A drone goes with a pop; a ship with a fireball.
+        if (this.small[event.who]) push('blast', event.who, event.who, event.who, 0.6, 0.25)
+        else push('blast', event.who, event.who, event.who, 1.8, 1)
       }
     }
     // A long fight between rapid-fire ships must not pile these up.
     if (this.effects.length > 300) this.effects.splice(0, this.effects.length - 300)
   }
 
-  /** Draws one frame. `at` is where each ship is on screen, or null when it is out of view. */
-  draw(at: Point[], dt: number) {
+  /** Draws one frame. `at` is where each ship, drone and squadron is on screen, or null when it is out of view or not in space. */
+  draw(at: Point[], dt: number, craft: CraftMark[] = []) {
     const ctx = this.ctx
     ctx.clearRect(0, 0, this.width, this.height)
+    // Drones are darts and squadrons are wider wedges, in their side's colour; one that is attacking is filled in.
+    ctx.lineWidth = 1.25
+    ctx.lineJoin = 'round'
+    for (const mark of craft) {
+      const size = mark.squadron ? 5.5 : 3.5
+      ctx.beginPath()
+      ctx.moveTo(mark.x, mark.y - size)
+      ctx.lineTo(mark.x + size * (mark.squadron ? 1.15 : 0.8), mark.y + size * 0.8)
+      ctx.lineTo(mark.x, mark.y + size * 0.3)
+      ctx.lineTo(mark.x - size * (mark.squadron ? 1.15 : 0.8), mark.y + size * 0.8)
+      ctx.closePath()
+      ctx.globalAlpha = 0.9
+      ctx.fillStyle = mark.hot ? COLOURS[mark.side] : 'rgb(5 8 12 / 0.75)'
+      ctx.fill()
+      ctx.strokeStyle = COLOURS[mark.side]
+      ctx.stroke()
+    }
+    ctx.globalAlpha = 1
     if (!this.effects.length) return
     ctx.lineCap = 'round'
     this.effects = this.effects.filter((effect) => {
@@ -88,7 +131,7 @@ export class FireEffects {
       const target = at[effect.to]
       if (!target) return true
       const t = effect.age / effect.life
-      const color = effect.by === this.me ? MINE : this.teams[effect.by] === this.teams[this.me] ? ALLIES : THEIRS
+      const color = COLOURS[this.sides[effect.by]] ?? THEIRS
 
       if (effect.kind === 'tracer' && source) {
         const dx = target.x - source.x
@@ -127,7 +170,7 @@ export class FireEffects {
         ctx.arc(target.x, target.y, 3 + effect.amount * t, 0, Math.PI * 2)
         ctx.stroke()
       } else if (effect.kind === 'blast') {
-        const radius = 10 + 90 * Math.sqrt(t)
+        const radius = (10 + 90 * Math.sqrt(t)) * effect.amount
         const glow = ctx.createRadialGradient(target.x, target.y, 0, target.x, target.y, radius)
         glow.addColorStop(0, `rgba(255, 244, 214, ${0.95 * (1 - t)})`)
         glow.addColorStop(0.35, `rgba(255, 170, 70, ${0.8 * (1 - t)})`)

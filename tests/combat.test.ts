@@ -10,7 +10,9 @@ import { buildLoadout, computeStats, projects, type Loadout, type Projection } f
 import {
   Combat,
   LOCK_LOCKED,
+  abilityStats,
   angularVelocity,
+  craftStats,
   hitChance,
   lockState,
   lockTime,
@@ -38,7 +40,8 @@ function seeded(seed = 1) {
   }
 }
 
-const sample = (label: string) => SAMPLE_FITS.find((s) => s.label === label)!.eft
+// A fit is named by its sample label, or pasted in full.
+const sample = (label: string) => (label.startsWith('[') ? label : SAMPLE_FITS.find((s) => s.label === label)!.eft)
 const loadoutOf = (label: string): Loadout => buildLoadout(loadFit(sample(label), dataset), dataset, 50)
 const none: boolean[] = []
 
@@ -57,16 +60,32 @@ class Duel {
       seeded(args[2] ?? 1),
       teams,
     )
+    // Every drone and squadron starts docked, at its ship.
+    for (let i = this.world.ships.length; i < this.combat.ships.length; i++) {
+      this.world.ships.push({ pos: [...this.world.ships[this.combat.owner[i]].pos], vel: [0, 0, 0], order: { kind: 'stop' } })
+    }
   }
   specs(): ShipSpec[] {
-    return this.combat.stats.map((s) => ({ maxVelocity: s.maxVelocity, mass: s.mass, agility: s.agility, radius: 50 }))
+    return this.combat.stats.map((s, i) => this.combat.nav[i] ?? { maxVelocity: s.maxVelocity * this.combat.slow(i, this.world), mass: s.mass, agility: s.agility, radius: 50 })
+  }
+  /** The drones and squadrons ship `owner` carries, as indices. */
+  craft(owner: number) {
+    return this.combat.craftOf(owner)
+  }
+  state(i: number) {
+    return this.combat.runs[i]!.state
+  }
+  /** Has ship `index` lock `t` and waits for it, however long that ship's sensors take. */
+  lock(index: number, t: number) {
+    this.cmd(index, { c: 'lock', t })
+    for (let waited = 0; waited < 120 && lockState(this.combat.ships[index], t) !== LOCK_LOCKED; waited++) this.run(1)
   }
   range(a: number, b: number) {
     return Math.hypot(...this.world.ships[a].pos.map((v, i) => v - this.world.ships[b].pos[i]))
   }
   refresh() {
     this.combat.ships.forEach((ship, index) => {
-      if (!this.combat.dirty[index]) return
+      if (!this.combat.dirty[index] || index >= this.combat.shipCount) return
       this.combat.dirty[index] = false
       const projections: Projection[] = []
       this.combat.ships.forEach((other, o) => {
@@ -157,7 +176,7 @@ describe('damage', () => {
     resists: [[0.5, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
     capMax: 100, capRecharge: 100, shieldRecharge: 0, lockRange: 50_000, maxLocked: 2, scanRes: 500, sensorStrength: 10, sensor: 0,
     modules: [moduleStats({ kind: 'turret', name: 'Test gun', needsTarget: true, damage: [100, 0, 0, 0], range: 50_000, tracking: 1000, cycle: 1 })],
-    drones: [], droneRange: 0,
+    craft: [], droneRange: 0, droneBandwidth: 0, droneMax: 0,
   })
 
   it('spills from shield into armor and hull, applying each layer\'s resists', () => {
@@ -298,19 +317,11 @@ describe('fits in a fight', () => {
     expect(ship.hp[1] - before).toBeCloseTo(repairer.amount * 3 + repairer.amount, 3)
   })
 
-  it('sends drones out, lets them fight, and brings them home', () => {
+  it('still plays out when a ship carries drones the computer flies', () => {
     const duel = new Duel('Caracal', 'Rifter')
-    expect(duel.combat.stats[0].drones[0]).toMatchObject({ name: 'Warrior II', count: 2, sigRes: 25 })
-    expect(duel.cmd(0, { c: 'drones', on: true })).toMatch(/lock/i)
-    duel.cmd(0, { c: 'lock', t: 1 })
-    duel.run(7)
-    expect(duel.cmd(0, { c: 'drones', on: true })).toBeNull()
-    duel.run(20)
-    expect(duel.combat.ships[0].drones.state).toBe('engaged')
+    duel.run(240, [0, 1])
+    expect(duel.combat.winner).not.toBeNull()
     expect(duel.combat.events.some((e) => e.t === 'fire' && e.weapon === 'drone' && e.damage > 0)).toBe(true)
-    duel.cmd(0, { c: 'drones', on: false })
-    duel.run(5)
-    expect(duel.combat.ships[0].drones.state).toBe('bay')
   })
 })
 
@@ -393,5 +404,332 @@ describe('fights with more than two ships', () => {
     const stats = computeStats(hull, none)
     expect(stats.modules).toEqual([])
     expect(stats.hp[0]).toBeGreaterThan(500)
+  })
+})
+
+const VENDETTA = `[Vendetta, Test]
+Drone Damage Amplifier II
+
+10000MN Afterburner II
+
+Fighter Support Unit II
+
+Firbolg II x18
+Cyclops II x12`
+
+const ISHTAR = `[Ishtar, Test]
+Drone Damage Amplifier II
+
+50MN Microwarpdrive II
+
+Drone Link Augmentor II
+
+Hammerhead II x5
+Warrior II x5
+Garde II x2
+Warrior SW-300 x2
+Acolyte EV-300 x1`
+
+describe('drones', () => {
+  it('lists every drone in the bay as its own craft, docked', () => {
+    const duel = new Duel('Caracal', 'Rifter')
+    const mine = duel.craft(0)
+    expect(mine).toEqual([2, 3])
+    expect(duel.combat.craft[2]).toMatchObject({ kind: 'drone', name: 'Warrior II', size: 1, bandwidth: 5 })
+    expect(duel.combat.craft[2]!.abilities[0]).toMatchObject({ kind: 'attack', sigRes: 25 })
+    expect(mine.map((i) => duel.state(i))).toEqual(['bay', 'bay'])
+    expect(duel.combat.present(2)).toBe(false)
+    expect(duel.combat.teams[2]).toBe(0)
+    // Docked drones cannot be locked.
+    expect(duel.cmd(1, { c: 'lock', t: 2 })).toMatch(/no longer in space/i)
+  })
+
+  it('launches, engages a locked target, hits it with its own tracking, and comes home', () => {
+    const duel = new Duel('Caracal', 'Rifter')
+    const mine = duel.craft(0)
+    expect(duel.cmd(0, { c: 'craft', a: 'engage', ids: mine })).toMatch(/lock/i)
+    expect(duel.cmd(0, { c: 'craft', a: 'launch', ids: mine })).toBeNull()
+    expect(mine.map((i) => duel.state(i))).toEqual(['idle', 'idle'])
+    duel.cmd(0, { c: 'lock', t: 1 })
+    duel.run(8)
+    // Idle drones circle their own ship.
+    for (const i of mine) expect(duel.range(i, 0)).toBeLessThan(2_500)
+    expect(duel.cmd(0, { c: 'craft', a: 'engage', ids: mine })).toBeNull()
+    duel.run(20)
+    expect(mine.map((i) => duel.state(i))).toEqual(['engage', 'engage'])
+    // They flew to the target and are circling it at their own orbit range.
+    for (const i of mine) expect(duel.range(i, 1)).toBeLessThan(2_000)
+    const shots = duel.combat.events.filter((e) => e.t === 'fire' && e.weapon === 'drone')
+    expect(shots.length).toBeGreaterThan(4)
+    expect(shots.some((e) => e.t === 'fire' && e.damage > 0 && e.from === mine[0])).toBe(true)
+    // What a drone does counts for its ship.
+    expect(duel.combat.ships[0].damageDealt).toBeGreaterThan(0)
+    duel.cmd(0, { c: 'craft', a: 'recall', ids: mine })
+    duel.run(15)
+    expect(mine.map((i) => duel.state(i))).toEqual(['bay', 'bay'])
+  })
+
+  it('launches only what the ship has the bandwidth and the control for', () => {
+    const duel = new Duel('[Caracal, drones]\n\n\n\n\n\n\nWarrior II x4', 'Rifter')
+    const mine = duel.craft(0)
+    expect(mine).toHaveLength(4)
+    expect(duel.cmd(0, { c: 'craft', a: 'launch', ids: mine })).toMatch(/bandwidth/i)
+    expect(mine.map((i) => duel.state(i))).toEqual(['idle', 'idle', 'bay', 'bay'])
+    // Bring one in and another can go out.
+    duel.cmd(0, { c: 'craft', a: 'recall', ids: [mine[0]] })
+    duel.run(5)
+    expect(duel.cmd(0, { c: 'craft', a: 'launch', ids: [mine[3]] })).toBeNull()
+    expect(mine.map((i) => duel.state(i))).toEqual(['bay', 'idle', 'bay', 'idle'])
+
+    const ishtar = new Duel(ISHTAR, 'Rifter')
+    const all = ishtar.craft(0)
+    expect(all).toHaveLength(15)
+    expect(ishtar.cmd(0, { c: 'craft', a: 'launch', ids: all })).toMatch(/5 drones at once/i)
+    expect(all.filter((i) => ishtar.combat.present(i))).toHaveLength(5)
+  })
+
+  it('can be locked and shot down, and takes its lock with it when it docks', () => {
+    const duel = new Duel('Caracal', 'Rifter')
+    const [first, second] = duel.craft(0)
+    duel.cmd(0, { c: 'craft', a: 'launch', ids: [first, second] })
+    duel.run(1)
+    expect(duel.cmd(1, { c: 'lock', t: first })).toBeNull()
+    expect(duel.cmd(1, { c: 'lock', t: second })).toBeNull()
+    duel.run(6)
+    expect(lockState(duel.combat.ships[1], first)).toBe(LOCK_LOCKED)
+    duel.cmd(0, { c: 'craft', a: 'recall', ids: [second] })
+    duel.world.ships[1].order = { kind: 'approach', target: first }
+    duel.cmd(1, { c: 'target', t: first })
+    duel.everythingOn(1)
+    // A light drone is a small, quick target even webbed: most shots miss.
+    duel.run(120)
+    expect(duel.state(second)).toBe('bay')
+    expect(lockState(duel.combat.ships[1], second)).toBe(0)
+    expect(duel.combat.ships[first].dead).toBe(true)
+    expect(duel.combat.events.some((e) => e.t === 'dead' && e.who === first)).toBe(true)
+    // Losing a drone does not end the fight, and a dead drone takes no more orders.
+    expect(duel.combat.winner).toBeNull()
+    duel.cmd(0, { c: 'craft', a: 'launch', ids: [first] })
+    expect(duel.combat.present(first)).toBe(false)
+  })
+
+  it('defends its ship when aggressive and holds when passive', () => {
+    const attack = (aggressive: boolean) => {
+      const duel = new Duel('Caracal', 'Rifter')
+      const mine = duel.craft(0)
+      duel.cmd(0, { c: 'stance', aggressive })
+      duel.cmd(0, { c: 'craft', a: 'launch', ids: mine })
+      duel.world.ships[1].order = { kind: 'orbit', target: 0, range: 1_000 }
+      duel.cmd(1, { c: 'lock', t: 0 })
+      duel.run(8)
+      expect(mine.map((i) => duel.state(i))).toEqual(['idle', 'idle'])
+      duel.cmd(1, { c: 'mod', i: duel.index(1, 'AutoCannon'), on: true })
+      duel.run(10)
+      return mine.map((i) => duel.state(i))
+    }
+    expect(attack(true)).toEqual(['engage', 'engage'])
+    expect(attack(false)).toEqual(['idle', 'idle'])
+  })
+
+  it('leaves a sentry where it was dropped and makes the ship come back for it', () => {
+    const duel = new Duel(ISHTAR, 'Rifter')
+    const sentry = duel.craft(0).find((i) => duel.combat.craft[i]!.name === 'Garde II')!
+    duel.cmd(0, { c: 'craft', a: 'launch', ids: [sentry] })
+    const dropped = [...duel.world.ships[sentry].pos]
+    duel.world.ships[0].order = { kind: 'heading', dir: [1, 0, 0] }
+    duel.run(30)
+    expect(duel.world.ships[sentry].pos).toEqual(dropped)
+    expect(duel.range(sentry, 0)).toBeGreaterThan(2_500)
+    expect(duel.cmd(0, { c: 'craft', a: 'recall', ids: [sentry] })).toMatch(/scoop/i)
+    duel.world.ships[0].order = { kind: 'approach', target: sentry }
+    duel.run(40)
+    expect(duel.cmd(0, { c: 'craft', a: 'recall', ids: [sentry] })).toBeNull()
+    expect(duel.state(sentry)).toBe('bay')
+  })
+
+  it('slows a ship with web drones and drains it with a neutralizer drone', () => {
+    const duel = new Duel(ISHTAR, 'Rifter')
+    const named = (name: string) => duel.craft(0).filter((i) => duel.combat.craft[i]!.name === name)
+    const webs = named('Warrior SW-300')
+    const neut = named('Acolyte EV-300')
+    duel.lock(0, 1)
+    expect(duel.cmd(0, { c: 'craft', a: 'engage', ids: [...webs, ...neut] })).toBeNull()
+    duel.run(15)
+    expect(duel.combat.slow(1, duel.world)).toBeLessThan(0.95)
+    expect(duel.combat.slow(1, duel.world)).toBeGreaterThan(0.85)
+    expect(duel.combat.craftEffects(1)).toEqual(expect.arrayContaining(['web', 'neut']))
+    expect(duel.combat.ships[1].cap).toBeLessThan(duel.combat.stats[1].capMax - 5)
+  })
+
+  it('takes smartbomb damage like anything else nearby', () => {
+    const stats = (craft: ShipStats['craft'], modules: ShipStats['modules'] = []): ShipStats => ({
+      maxVelocity: 0, mass: 1e6, agility: 1, signature: 100, hp: [1000, 1000, 1000],
+      resists: [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+      capMax: 100, capRecharge: 100, shieldRecharge: 0, lockRange: 50_000, maxLocked: 2, scanRes: 500, sensorStrength: 10, sensor: 0,
+      modules, craft, droneRange: 50_000, droneBandwidth: 25, droneMax: 5,
+    })
+    const drone = craftStats({ kind: 'drone', name: 'Test drone', hp: [10, 10, 10], bandwidth: 5 })
+    const bomb = moduleStats({ kind: 'smartbomb', name: 'Test bomb', damage: [25, 0, 0, 0], range: 5_000, cycle: 1 })
+    const combat = new Combat([stats([drone, drone]), stats([], [bomb])], () => 0.5)
+    const world = createWorld(2_000)
+    for (let i = 2; i < 4; i++) world.ships.push({ pos: [...world.ships[0].pos], vel: [0, 0, 0], order: { kind: 'stop' } })
+    combat.command(0, { c: 'craft', a: 'launch', ids: [2] }, world)
+    combat.command(1, { c: 'mod', i: 0, on: true }, world)
+    for (let t = 0; t < 1.5; t += 0.1) combat.tick(world, 0.1)
+    // The one in space is destroyed; the one still docked is untouched.
+    expect(combat.ships[2].dead).toBe(true)
+    expect(combat.ships[3].hp).toEqual([10, 10, 10])
+  })
+
+  it('validates orders for drones and squadrons', () => {
+    expect(parseCommand({ c: 'craft', a: 'engage', ids: [2, 3] }, 4)).toEqual({ c: 'craft', a: 'engage', ids: [2, 3] })
+    expect(parseCommand({ c: 'craft', a: 'orbit', ids: [2], t: 1 }, 4)).toEqual({ c: 'craft', a: 'orbit', ids: [2], t: 1 })
+    expect(parseCommand({ c: 'craft', a: 'explode', ids: [2] }, 4)).toBeNull()
+    expect(parseCommand({ c: 'craft', a: 'launch', ids: [] }, 4)).toBeNull()
+    expect(parseCommand({ c: 'craft', a: 'launch', ids: [9] }, 4)).toBeNull()
+    expect(parseCommand({ c: 'craft', a: 'engage', ids: [2], t: 9 }, 4)).toBeNull()
+    expect(parseCommand({ c: 'ability', ids: [2], k: 1, on: true }, 4)).toEqual({ c: 'ability', ids: [2], k: 1, on: true })
+    expect(parseCommand({ c: 'ability', ids: [2], k: 1 }, 4)).toBeNull()
+    expect(parseCommand({ c: 'stance', aggressive: false })).toEqual({ c: 'stance', aggressive: false })
+    expect(parseCommand({ c: 'focus', on: true })).toEqual({ c: 'focus', on: true })
+    // Nobody can give orders to someone else's drones.
+    const duel = new Duel('Caracal', 'Rifter')
+    duel.cmd(1, { c: 'craft', a: 'launch', ids: duel.craft(0) })
+    expect(duel.craft(0).map((i) => duel.state(i))).toEqual(['bay', 'bay'])
+  })
+})
+
+describe('fighters', () => {
+  it('puts each squadron in the fight as one craft with its abilities', () => {
+    const duel = new Duel(VENDETTA, 'Rifter')
+    const mine = duel.craft(0)
+    expect(mine).toHaveLength(5)
+    const light = duel.combat.craft[mine[0]]!
+    const heavy = duel.combat.craft[mine[4]]!
+    expect(light).toMatchObject({ kind: 'fighter', name: 'Firbolg II', size: 6, signature: 110 })
+    expect(heavy).toMatchObject({ kind: 'fighter', name: 'Cyclops II', size: 6 })
+    expect(light.abilities.map((a) => a.kind)).toEqual(['attack', 'salvo', 'speed'])
+    expect(light.abilities[1]).toMatchObject({ name: 'Heavy rocket salvo', charges: 12, rearm: 4 })
+    expect(heavy.abilities[1]).toMatchObject({ name: 'Torpedo salvo', charges: 6, rearm: 6 })
+    // The burst is six times the squadron's ordinary speed and signature, for 20 seconds in every 80.
+    expect(light.abilities[2]).toMatchObject({ name: 'Microwarpdrive', speed: 6, signature: 6, cycle: 20, cooldown: 60 })
+    // Light cannons: reduction factor 3 over sensitivity 5.5.
+    expect(light.abilities[0].drf).toBeCloseTo(0.6444, 3)
+    expect(light.speed).toBeGreaterThan(743)
+    expect(light.speed).toBeLessThan(2_500)
+    // The squadron's hit points are its fighters' together.
+    expect(duel.combat.stats[mine[0]].hp[0]).toBeCloseTo(light.hp[0] * 6, 3)
+  })
+
+  it('flies to a target, never misses, and does less to something small', () => {
+    const duel = new Duel(VENDETTA, 'Rifter')
+    const [light] = duel.craft(0)
+    const craft = duel.combat.craft[light]!
+    duel.lock(0, 1)
+    expect(duel.cmd(0, { c: 'craft', a: 'engage', ids: [light] })).toBeNull()
+    duel.run(25)
+    const shots = duel.combat.events.filter((e) => e.t === 'fire' && e.from === light)
+    expect(shots.length).toBeGreaterThan(2)
+    for (const shot of shots) expect(shot).toMatchObject({ weapon: 'fighter', quality: 3 })
+    const full = craft.abilities[0].damage!.reduce((sum, x) => sum + x, 0) * 6
+    // A frigate is a much smaller target than the cannons are built for.
+    for (const shot of shots) if (shot.t === 'fire') expect(shot.damage).toBeLessThan(full * 0.6)
+    expect(duel.combat.ships[1].hp[0]).toBeLessThan(duel.combat.stats[1].hp[0])
+  })
+
+  it('spends salvo volleys only when armed and rearms them in the tube', () => {
+    const duel = new Duel(VENDETTA, VENDETTA)
+    const [light] = duel.craft(0)
+    const salvo = () => duel.combat.runs[light]!.abilities[1]
+    duel.lock(0, 1)
+    expect(duel.cmd(0, { c: 'craft', a: 'engage', ids: [light] })).toBeNull()
+    duel.run(30)
+    expect(salvo().charges).toBe(12)
+    expect(duel.cmd(0, { c: 'ability', ids: [light], k: 1, on: true })).toBeNull()
+    duel.run(30)
+    expect(salvo().charges).toBeLessThan(12)
+    expect(duel.combat.events.some((e) => e.t === 'fire' && e.weapon === 'salvo' && e.from === light && e.damage > 0)).toBe(true)
+    const spent = 12 - salvo().charges
+    duel.cmd(0, { c: 'craft', a: 'recall', ids: [light] })
+    for (let waited = 0; waited < 60 && duel.state(light) !== 'bay'; waited++) duel.run(1)
+    expect(duel.state(light)).toBe('bay')
+    // Refuelling takes the longer of the squadron's refuel time and rearming what it fired.
+    expect(duel.combat.runs[light]!.refuel).toBeGreaterThan(0)
+    expect(duel.cmd(0, { c: 'craft', a: 'launch', ids: [light] })).toMatch(/refuelling/i)
+    duel.run(Math.max(30, spent * 4) + 1)
+    expect(salvo().charges).toBe(12)
+    expect(duel.cmd(0, { c: 'craft', a: 'launch', ids: [light] })).toBeNull()
+  })
+
+  it('bursts to six times its speed and signature, then has to wait', () => {
+    const duel = new Duel(VENDETTA, 'Rifter')
+    const [light] = duel.craft(0)
+    const craft = duel.combat.craft[light]!
+    expect(duel.cmd(0, { c: 'ability', ids: [light], k: 2, on: true })).toMatch(/launch/i)
+    duel.cmd(0, { c: 'craft', a: 'orbit', ids: [light], t: 1 })
+    duel.run(1)
+    expect(duel.state(light)).toBe('idle')
+    expect(duel.combat.runs[light]!.target).toBe(1)
+    expect(duel.combat.sig(light)).toBeCloseTo(110, 3)
+    expect(duel.cmd(0, { c: 'ability', ids: [light], k: 2, on: true })).toBeNull()
+    duel.run(0.2)
+    expect(duel.combat.sig(light)).toBeCloseTo(660, 3)
+    expect(duel.combat.nav[light]!.maxVelocity).toBeCloseTo(craft.speed * 6, 3)
+    duel.run(21)
+    expect(duel.combat.sig(light)).toBeCloseTo(110, 3)
+    expect(duel.cmd(0, { c: 'ability', ids: [light], k: 2, on: true })).toMatch(/cooling down/i)
+    duel.run(60)
+    expect(duel.cmd(0, { c: 'ability', ids: [light], k: 2, on: true })).toBeNull()
+  })
+
+  it('loses a fighter for every fighter\'s worth of damage, and hits less hard for it', () => {
+    const fighter = craftStats({
+      kind: 'fighter', name: 'Test fighter', size: 4, hp: [90, 0, 10], speed: 1_000, orbitSpeed: 1_000, orbitRange: 1_000,
+      abilities: [abilityStats({ kind: 'attack', name: 'Attack', cycle: 1, range: 5_000, damage: [10, 0, 0, 0] })],
+    })
+    const stats = (craft: ShipStats['craft'], modules: ShipStats['modules'] = []): ShipStats => ({
+      maxVelocity: 0, mass: 1e6, agility: 1, signature: 100, hp: [10_000, 1000, 1000],
+      resists: [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+      capMax: 100, capRecharge: 100, shieldRecharge: 0, lockRange: 50_000, maxLocked: 2, scanRes: 5000, sensorStrength: 10, sensor: 0,
+      modules, craft, droneRange: 50_000, droneBandwidth: 0, droneMax: 0,
+    })
+    const gun = moduleStats({ kind: 'turret', name: 'Test gun', needsTarget: true, damage: [150, 0, 0, 0], range: 50_000, tracking: 1000, sigRes: 25, cycle: 5 })
+    const combat = new Combat([stats([fighter]), stats([], [gun])], () => 0.51)
+    const world = createWorld(2_000)
+    world.ships.push({ pos: [...world.ships[0].pos], vel: [0, 0, 0], order: { kind: 'stop' } })
+    const run = (seconds: number) => {
+      for (let t = 0; t < seconds - 1e-9; t += 0.1) {
+        step(world, combat.stats.map((s, i) => combat.nav[i] ?? { maxVelocity: 0, mass: s.mass, agility: s.agility, radius: 50 }), 0.1)
+        combat.tick(world, 0.1)
+      }
+    }
+    combat.command(0, { c: 'lock', t: 1 }, world)
+    combat.command(1, { c: 'lock', t: 2 }, world)
+    combat.command(0, { c: 'craft', a: 'launch', ids: [2] }, world)
+    run(3)
+    combat.command(0, { c: 'craft', a: 'engage', ids: [2] }, world)
+    run(3)
+    const before = combat.events.filter((e) => e.t === 'fire' && e.from === 2).at(-1)!
+    expect(before).toMatchObject({ damage: 40 })
+    // One shot for 150: a fighter and a half's worth.
+    combat.command(1, { c: 'lock', t: 2 }, world)
+    run(3)
+    combat.command(1, { c: 'mod', i: 0, on: true }, world)
+    run(0.2)
+    combat.command(1, { c: 'mod', i: 0, on: false }, world)
+    expect(combat.runs[2]!.alive).toBe(3)
+    run(2)
+    const after = combat.events.filter((e) => e.t === 'fire' && e.from === 2).at(-1)!
+    expect(after).toMatchObject({ damage: 30 })
+    expect(combat.ships[2].dead).toBe(false)
+  })
+
+  it('lets the computer fly a supercarrier\'s squadrons', () => {
+    const duel = new Duel(VENDETTA, '[Apocalypse, Empty hull]')
+    duel.run(120, [0])
+    const mine = duel.craft(0)
+    expect(mine.filter((i) => duel.state(i) === 'engage').length).toBeGreaterThan(2)
+    expect(duel.combat.events.some((e) => e.t === 'fire' && e.weapon === 'salvo' && e.damage > 0)).toBe(true)
+    expect(duel.combat.ships[1].hp[0]).toBeLessThan(duel.combat.stats[1].hp[0] * 0.9)
   })
 })

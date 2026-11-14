@@ -57,6 +57,33 @@ describe('loadFit', () => {
     expect(fit.problems.filter((p) => p.message.startsWith('Drone bandwidth'))).toEqual([])
   })
 
+  it('sorts pasted fighters into squadrons, one per launch tube', () => {
+    // Vendetta: five tubes, at most three light squadrons and four heavy; six fighters to a squadron.
+    const fit = loadFit('[Vendetta, fighters]\n\n\n\n\n\n\nFirbolg II x18\nCyclops II x12', dataset)
+    expect(fit.squadrons).toEqual([
+      { name: 'Firbolg II', count: 6 },
+      { name: 'Firbolg II', count: 6 },
+      { name: 'Firbolg II', count: 6 },
+      { name: 'Cyclops II', count: 6 },
+      { name: 'Cyclops II', count: 6 },
+    ])
+    expect(fit.tubes).toBe(5)
+    expect(fit.problems).toEqual([])
+    expect(fit.fit.cargo ?? []).toEqual([])
+    expect(fit.stats.offense.totalDps).toBeGreaterThan(1000)
+  })
+
+  it('leaves fighters in the hangar when there is no tube for them', () => {
+    const light = loadFit('[Vendetta, fighters]\n\n\n\n\n\n\nFirbolg II x30', dataset)
+    expect(light.squadrons).toHaveLength(3)
+    expect(light.problems.map((p) => p.message)).toEqual(['12 Firbolg II stay in the hangar: this ship launches 3 light squadrons.'])
+    const short = loadFit('[Vendetta, fighters]\n\n\n\n\n\n\nFirbolg II x4', dataset)
+    expect(short.squadrons).toEqual([{ name: 'Firbolg II', count: 4 }])
+    const none = loadFit('[Caracal, fighters]\n\n\n\n\n\n\nFirbolg II x6', dataset)
+    expect(none.squadrons).toEqual([])
+    expect(none.problems.map((p) => p.message)).toEqual(['Firbolg II: this ship has no fighter launch tubes.'])
+  })
+
   it('sanity-checks a Rifter against known hull values', () => {
     const { stats } = loadFit('[Rifter, bare]', dataset)
     // All-V Rifter: 3 turret hardpoints, 35 m signature, 5 AU/s warp.

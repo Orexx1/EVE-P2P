@@ -19,7 +19,7 @@ on:
         description: Ship DNA (hull:faction:race) for the single-hull check
         required: false
       fit:
-        description: Sample fit for the fight check (0 Rifter, 1 Merlin, 2 Caracal)
+        description: Sample fit for the fight check (0 Rifter, 1 Merlin, 2 Caracal, 3 Vexor, 4 Vendetta)
         required: false
       gfx:
         description: Graphics options for the fight check, as JSON

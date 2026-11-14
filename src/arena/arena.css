@@ -671,13 +671,300 @@ html.in-arena {
   display: none;
 }
 
-.arena .drones {
-  min-height: 1.75rem;
-  padding: 0.125rem 0.5rem;
+/* The drone window, top left: orders across the top, then every drone and
+   squadron as a tile. A tile's border says what it is doing; a white outline
+   means it is picked to take the next order. */
+.craft {
+  position: absolute;
+  top: calc(max(0.5rem, env(safe-area-inset-top)) + 2.5rem);
+  left: max(0.5rem, env(safe-area-inset-left));
+  width: 14rem;
+  /* Stops short of the combat log below it. */
+  max-height: calc(100% - 15.25rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.3125rem;
 }
 
-.arena .drones.on {
-  border-color: #7fe08a;
+.craft.with-squadrons {
+  width: 17rem;
+}
+
+.craft-orders {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 0.1875rem;
+}
+
+.arena .craft-orders button {
+  min-height: 1.75rem;
+  padding: 0.125rem 0;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+/* Engaging is the hostile act. */
+.arena .craft-orders button.primary {
+  border-color: var(--hostile);
+  color: #ffd9d4;
+}
+
+.craft-settings {
+  display: flex;
+  gap: 0.1875rem;
+}
+
+.arena .craft-settings button {
+  flex: 1 1 0;
+  min-height: 1.375rem;
+  padding: 0 0.25rem;
+  font-size: 0.6875rem;
+  color: var(--muted);
+}
+
+.arena .craft-settings button[aria-pressed='true'] {
+  border-color: var(--go-dim);
+  color: var(--go);
+}
+
+.craft-use {
+  margin: 0;
+  font-size: 0.6875rem;
+  line-height: 1.2;
+}
+
+.craft-use:empty {
+  display: none;
+}
+
+.craft-list {
+  margin: 0;
+  padding: 0 1px 1px;
+  list-style: none;
+  display: grid;
+  gap: 0.25rem;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.arena .craft-type {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  font-size: 0.75rem;
+  line-height: 1.3;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.craft-type .sub {
+  font-size: 0.6875rem;
+}
+
+.craft-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.1875rem;
+  margin-top: 0.125rem;
+}
+
+.arena .craft-tile {
+  position: relative;
+  width: 1.875rem;
+  height: 1.875rem;
+  min-height: 0;
+  padding: 2px;
+  display: grid;
+  align-content: end;
+  background: #101820;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.craft-icon {
+  position: absolute;
+  inset: 0 0 6px;
+  pointer-events: none;
+}
+
+.craft-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.craft-tile .bars {
+  position: relative;
+  gap: 1px;
+}
+
+.craft-tile .bar {
+  height: 2px;
+  border-radius: 0;
+  background: rgb(10 15 20 / 0.85);
+}
+
+/* Docked. */
+.arena .craft-tile.bay {
+  border-style: dashed;
+}
+
+.craft-tile.bay .craft-icon {
+  opacity: 0.4;
+}
+
+/* In space with nothing to shoot. */
+.arena .craft-tile.idle {
+  border-color: var(--friend);
+}
+
+.arena .craft-tile.engage {
+  border-color: var(--hostile);
+  box-shadow: inset 0 0 0.625rem -0.25rem var(--hostile);
+}
+
+.arena .craft-tile.recall {
+  border-color: var(--caution);
+}
+
+.arena .craft-tile.dead {
+  opacity: 0.25;
+  cursor: default;
+}
+
+.arena .craft-tile.picked {
+  opacity: 1;
+  outline: 1.5px solid var(--text);
+  outline-offset: -1px;
+}
+
+/* A squadron: its tile is a row, with its abilities beside it. */
+.squadron {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.1875rem;
+}
+
+.arena .craft-tile.wide {
+  width: auto;
+  height: auto;
+  min-height: 1.875rem;
+  grid-template-columns: 1.375rem minmax(0, 1fr);
+  align-content: start;
+  column-gap: 0.3125rem;
+  padding: 2px 3px 3px 2px;
+  text-align: left;
+  line-height: 1.15;
+}
+
+.wide .craft-icon {
+  position: static;
+  grid-row: 1 / 3;
+  width: 1.375rem;
+  height: 1.375rem;
+  background: #0b1117;
+}
+
+.squad-name,
+.wide .sub {
+  grid-column: 2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.squad-name {
+  font-size: 0.75rem;
+}
+
+.squad-name b {
+  font-weight: 600;
+  color: var(--go);
+}
+
+.wide .sub {
+  font-size: 0.625rem;
+}
+
+.wide .bars {
+  grid-column: 1 / -1;
+  margin-top: 2px;
+}
+
+.abilities {
+  display: flex;
+  gap: 0.125rem;
+}
+
+.arena .ability {
+  min-width: 2.125rem;
+  min-height: 0;
+  padding: 0 0.25rem;
+  font-size: 0.6875rem;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+/* Armed, or a burst that is running. */
+.arena .ability.on {
+  border-color: var(--go-dim);
+  color: var(--go);
+}
+
+.arena .ability.speed.on {
+  border-color: var(--go);
+  box-shadow: inset 0 0 0.5rem -0.25rem var(--go);
+}
+
+/* Cooling down, or out of ammunition. */
+.arena .ability.waiting {
+  border-style: dashed;
+  color: var(--caution);
+}
+
+/* With squadrons the drone window is wider, so the locked targets move over to stay clear of it. */
+.hud.has-squadrons .targets {
+  left: calc((100% - 13.5rem) / 2 + 8rem);
+  max-width: calc(100% - 35rem);
+}
+
+/* A drone or squadron in space: the marker itself is drawn with the weapon fire;
+   this is the smaller touch target over it, which only shows a ring once it matters. */
+.arena .bracket.small {
+  top: -14px;
+  left: -14px;
+  width: 28px;
+  height: 28px;
+}
+
+.bracket.small .bracket-mark {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  transform: none;
+}
+
+.bracket.small:not(.selected):not(.locking):not(.locked) .bracket-mark {
+  border-color: transparent;
+}
+
+.bracket.small .bracket-label {
+  top: 24px;
+}
+
+.overview tr.small td:first-child {
+  padding-left: 0.5rem;
 }
 
 /* Locked targets, top centre: a card each with shield, armor and hull. The
@@ -883,9 +1170,40 @@ html.in-arena {
   max-width: 18rem;
 }
 
+/* A capital ship's rack is seven or eight modules wide: on a narrow screen everything along the bottom tightens up to fit. */
+@media (max-width: 60rem) {
+  .hud.wide-rack .mod {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  .hud.wide-rack .ship-readout {
+    min-width: 6.5rem;
+  }
+}
+
+/* On a phone the drone window and the combat log share the left edge: the log keeps its last three lines. */
+@media (max-height: 30rem) {
+  .hud.has-craft .combat-log li:nth-last-child(n + 4) {
+    display: none;
+  }
+
+  .craft {
+    max-height: calc(100% - 13.375rem);
+  }
+}
+
 @media (min-width: 64rem) and (min-height: 40rem) {
   .arena {
     font-size: 0.9375rem;
+  }
+
+  .craft {
+    width: 17rem;
+  }
+
+  .craft.with-squadrons {
+    width: 21rem;
   }
 
   .hud-side {

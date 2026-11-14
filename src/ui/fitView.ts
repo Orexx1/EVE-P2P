@@ -208,7 +208,7 @@ function targeting({ stats }: LoadedFit): string {
     </section>`
 }
 
-function fitted({ modules, drones, stats }: LoadedFit): string {
+function fitted({ modules, drones, squadrons, tubes, stats }: LoadedFit): string {
   const f = stats.fitting
   const groups = SLOT_ORDER.map((slot) => {
     const mods = modules.filter((m) => m.slot === slot)
@@ -234,9 +234,16 @@ function fitted({ modules, drones, stats }: LoadedFit): string {
         <ul>${drones
           .map(
             (d) =>
-              `<li>${d.total}× ${esc(d.name)}<span class="detail"> ${d.active === d.total ? 'all launched' : `${d.active} launched`}</span></li>`,
+              `<li>${d.total}× ${esc(d.name)}${d.active === d.total ? '' : `<span class="detail"> ${d.active} at a time</span>`}</li>`,
           )
           .join('')}</ul>
+      </div>`
+    : ''
+  const fighterGroup = squadrons.length
+    ? `
+      <div class="slot-group">
+        <h4>Fighters <span class="detail">${squadrons.length} of ${int(tubes)} launch tubes</span></h4>
+        <ul>${squadrons.map((s) => `<li>${s.count}× ${esc(s.name)}<span class="detail"> one squadron</span></li>`).join('')}</ul>
       </div>`
     : ''
   return `
@@ -247,6 +254,6 @@ function fitted({ modules, drones, stats }: LoadedFit): string {
         <div><dt>Powergrid</dt><dd>${one(f.powerUsed)} of ${one(f.powerMax)} MW</dd></div>
         <div><dt>Calibration</dt><dd>${int(f.calibrationUsed)} of ${int(f.calibrationMax)}</dd></div>
       </dl>
-      <div class="slot-groups">${groups}${droneGroup}</div>
+      <div class="slot-groups">${groups}${droneGroup}${fighterGroup}</div>
     </section>`
 }

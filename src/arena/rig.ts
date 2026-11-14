@@ -98,6 +98,16 @@ export class CameraRig {
     }
   }
 
+  /** Where a point in space sits on screen, in CSS pixels, or null if it is behind the camera. For things that are not ships. */
+  point(pos: Vec3): { x: number; y: number } | null {
+    this.scratch.set(pos[0] - this.origin[0], pos[1] - this.origin[1], pos[2] - this.origin[2]).project(this.camera)
+    if (this.scratch.z > 1) return null
+    return {
+      x: ((this.scratch.x + 1) / 2) * this.surface.clientWidth,
+      y: ((1 - this.scratch.y) / 2) * this.surface.clientHeight,
+    }
+  }
+
   /** The direction in space under a point on screen: where a double-tap sends the ship. */
   directionAt(clientX: number, clientY: number): Vec3 {
     const rect = this.surface.getBoundingClientRect()

@@ -22,7 +22,9 @@ the duel.
 | 5 | Real ship models in the fight view | Done, with stand-ins as the fallback |
 | 6 | Graphics options: presets, resolution, frame rate, anti-aliasing, textures, shaders | Done |
 | 7 | Extra ships on either side, flown by the computer | Done |
-| 8 | Overheating, drones as targets, scripts, boosters, implants, command bursts | Planned |
+| 8 | Drones and fighter squadrons as craft in space, with a drone window to command them | Done |
+| 9 | Real models for drones and fighters, bombs and micro jump drives, repair drones | Planned |
+| 10 | Overheating, scripts, boosters, implants, command bursts | Planned |
 
 Fits are computed with every skill at level V. Both ships start with every module
 off, as if they had just undocked.
@@ -62,13 +64,74 @@ and the highlighted card is the one modules are pointed at when switched on.
   ECM rolls against sensor strength and breaks the lock.
 - **Stats follow the fit**: when a module switches on or off, the fitting engine
   recomputes the ship with exactly what is running and what is being done to it.
+- **Drones and fighters** are craft in space, not a number added to the ship's
+  damage. See below.
+
+### Drones and fighters
+
+Every drone in the bay and every fighter squadron in a launch tube is its own
+thing in the fight. It has a position, a speed, shield, armor and hull, and it
+can be locked, webbed and shot down like a ship. A fit lists them the usual way
+(`Hammerhead II x5`, `Firbolg II x18`); fighters are sorted into squadrons, one
+per launch tube, within the ship's limits for light, support and heavy squadrons.
+
+A ship that carries any gets a drone window on the left of the fight screen:
+
+- **Launch, Engage, Orbit, Recall.** Tap tiles to pick which drones or squadrons
+  an order goes to; with none picked it goes to all of them. Engage sends them at
+  the active locked target, launching them first if they are still docked. Orbit
+  breaks off and circles the ship. Recall brings them home.
+- **Go to** sends fighter squadrons to hold beside whatever is selected, without
+  attacking it.
+- **Aggressive** drones go for whoever attacks the ship or its drones without
+  being told to; passive drones wait for an order. With **Focus fire** on, drones
+  that choose their own target all choose the same one: the pilot's active target
+  if it is attacking, otherwise the attacker nearest the ship.
+- **Squadron abilities** are buttons beside each squadron: its guns, a salvo of
+  rockets or torpedoes with a limited number of volleys, and a burst of speed
+  with a cooldown. Using one on a picked squadron uses it on every picked
+  squadron that has it.
+
+What is modelled:
+
+- A ship controls five drones at once, within its bandwidth. The bay can hold
+  more, and they can be swapped during the fight.
+- Drones close at their full speed, then circle at their orbit speed and range.
+  Their guns roll to hit like turrets, with the drone's own tracking against how
+  fast the target really crosses its sights. A target that outruns their orbit
+  leaves them chasing.
+- Drones can only be sent at targets inside the ship's drone control range.
+- Sentry drones stay where they are dropped and have to be scooped from within
+  2,500 m.
+- Web, neutralizer and ECM drones work. Smartbombs hit drones, the ship's own
+  included.
+- A squadron fights as one craft. Fighter weapons never miss; their damage is
+  scaled by the target's signature and speed and by falloff, and by how many
+  fighters are left. Every fighter's worth of damage costs the squadron a fighter.
+- A microwarpdrive burst multiplies a squadron's speed and its signature for
+  20 seconds, then rests for 60. Salvos are rearmed, and shields restored, while
+  the squadron refuels in its tube.
+- Support squadrons web, neutralize, jam and disrupt. Space superiority fighters
+  do a twentieth of their damage to ships and slow drones and fighters.
+- Computer-flown ships launch and use everything they carry.
+
+Simplified or taken from outside the fitting data:
+
+- Drones and squadrons are drawn as markers, not models.
+- How many volleys a salvo carries and how long one takes to rearm (12 at 4 s for
+  light attack squadrons, 6 at 6 s for heavy) and the 60 second cooldown on speed
+  bursts are the game's values as best known; the fitting data does not include
+  them.
+- Refuelling takes the squadron's refuelling time for each fighter still alive.
+- Micro jump drives, bombs and kamikaze runs on long-range fighters, and repair,
+  mining, salvage, painter, dampener and disruptor drones do nothing yet.
+- Lost fighters are not replaced from the hangar. A ship brings at most 25 drones
+  and squadrons into a fight.
+- When a ship dies, its drones and fighters go with it.
 
 Not modelled yet, or simplified:
 
 - Overheating, scripts, boosters, implants and command bursts.
-- Drones fight as a flight: they take travel time to reach the target, hit by
-  their own tracking, and cannot keep up with a target faster than they are, but
-  they cannot be shot at and have no flight path of their own.
 - Remote repair and other modules that only make sense with a third ship can be
   seen in the rack but not activated.
 - Ranges are measured centre to centre.

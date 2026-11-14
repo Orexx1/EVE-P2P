@@ -1,7 +1,8 @@
 // The computer's pilots: the solo practice target and any extra ships the host
 // added. Each one picks the nearest living enemy, flies to a range that suits
-// its weapons, locks, and runs its fit the obvious way. They issue the same
-// commands and orders a player would, so they are bound by the same rules.
+// its weapons, locks, runs its fit the obvious way, and sends out whatever
+// drones and fighters it carries. They issue the same commands and orders a
+// player would, so they are bound by the same rules.
 import { LOCK_LOCKED, LOCK_NONE, lockState, type Combat } from '../sim/combat'
 import { dist } from '../sim/vec'
 import type { World } from '../sim/world'
@@ -9,17 +10,18 @@ import type { World } from '../sim/world'
 /** A sensible stand-off for a ship: inside its weapons' reach. */
 export function preferredRange(combat: Combat, index: number): number {
   const weapon = combat.stats[index].modules.find((m) => m.damage)
-  if (!weapon) return 7_500
+  // A ship that fights with drones or fighters stays close enough to command them.
+  if (!weapon) return combat.stats[index].craft.length ? 15_000 : 7_500
   const reach = weapon.kind === 'missile' ? weapon.range * 0.5 : weapon.range + weapon.falloff * 0.5
   return Math.round(Math.max(1_000, Math.min(20_000, reach)) / 500) * 500
 }
 
-/** The nearest living ship on the other team, or -1. */
+/** The nearest living ship on the other team, or -1. Drones and fighters are left to whoever they bother. */
 export function nearestEnemy(combat: Combat, world: World, index: number): number {
   let best = -1
   let bestRange = Infinity
   combat.ships.forEach((ship, other) => {
-    if (ship.dead || combat.teams[other] === combat.teams[index]) return
+    if (other >= combat.shipCount || ship.dead || combat.teams[other] === combat.teams[index]) return
     const range = dist(world.ships[index].pos, world.ships[other].pos)
     if (range < bestRange) {
       best = other
@@ -64,5 +66,32 @@ export function runBot(combat: Combat, world: World, index: number, fights = tru
     if (m.kind === 'capBooster') want = ship.cap < stats.capMax * 0.5
     if (want !== run.wanted) combat.command(index, { c: 'mod', i, on: want }, world)
   })
-  if (stats.drones.length && ship.drones.state === 'bay') combat.command(index, { c: 'drones', on: true }, world)
+  flyCraft(combat, world, index, target)
+}
+
+/** Launches everything the ship can control, sends it at the target, and uses its abilities as they come ready. */
+function flyCraft(combat: Combat, world: World, index: number, target: number) {
+  const mine = combat.craftOf(index).filter((i) => !combat.ships[i].dead && combat.craft[i]!.abilities.length)
+  if (!mine.length) return
+  for (const i of mine) {
+    const run = combat.runs[i]!
+    const craft = combat.craft[i]!
+    // Stop at the first drone the ship has no room to control; a squadron still refuelling just waits.
+    if (run.state === 'bay' && combat.command(index, { c: 'craft', a: 'launch', ids: [i] }, world) && craft.kind === 'drone') break
+  }
+  const loose = mine.filter((i) => combat.present(i) && !(combat.runs[i]!.state === 'engage' && combat.runs[i]!.target === target))
+  if (loose.length) combat.command(index, { c: 'craft', a: 'engage', ids: loose }, world)
+  for (const i of mine) {
+    const run = combat.runs[i]!
+    if (run.state !== 'engage') continue
+    combat.craft[i]!.abilities.forEach((a, k) => {
+      const state = run.abilities[k]
+      if (a.kind === 'salvo' && !state.on && state.charges > 0) combat.command(index, { c: 'ability', ids: [i], k, on: true }, world)
+      // A speed burst is for closing the distance, not for circling.
+      if (a.kind === 'speed' && run.chasing && state.cooldown <= 0) combat.command(index, { c: 'ability', ids: [i], k, on: true }, world)
+    })
+    // Out of ammunition with nothing else to fight with: come home and rearm.
+    const spent = combat.craft[i]!.abilities.every((a, k) => a.kind === 'speed' || (a.charges > 0 && run.abilities[k].charges <= 0))
+    if (spent) combat.command(index, { c: 'craft', a: 'recall', ids: [i] }, world)
+  }
 }

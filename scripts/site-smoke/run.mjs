@@ -109,13 +109,38 @@ try {
   await page.click('.arena [data-act="orbit"]')
   await page.click('.arena [data-el="lock"]')
   await sleep(4000)
+  // A capital ship takes longer than that to lock.
+  await page.waitForFunction(() => document.querySelector('.arena [data-el="lock"]')?.textContent === 'Unlock', { timeout: 90_000 }).catch(() => note('the lock did not complete'))
   note(`models: ${state}`)
   for (const mod of await page.$$eval('.arena .mod:not(:disabled)', (els) => els.map((e) => e.dataset.mod))) {
     await page.click(`.arena [data-mod="${mod}"]`)
   }
+  // A ship with drones or fighters: send them at the target, with salvos armed and speed bursts used.
+  const craftWindow = () =>
+    page.evaluate(() => ({
+      tiles: [...document.querySelectorAll('.craft-tile')].map((t) => t.className.replace('craft-tile', '').replace('wide', '').trim()).join(','),
+      squadrons: [...document.querySelectorAll('.squadron')].map((t) => t.textContent.trim().replace(/\s+/g, ' ')),
+      use: document.querySelector('[data-el="craftUse"]')?.textContent,
+      marks: window.__arena?.craft,
+    }))
+  const hasCraft = !!(await page.$('.arena .craft:not([hidden])'))
+  if (hasCraft) {
+    await page.click('.arena [data-craft="engage"]')
+    await sleep(500)
+    for (const button of await page.$$('.arena .ability.salvo, .arena .ability.speed')) await button.click()
+    note(`drone window after Engage: ${JSON.stringify(await craftWindow())}`)
+  }
   // Let textures still streaming in land, and the fight develop.
   await sleep(state === 'ready' ? 8_000 : 2000)
   await shoot('fight')
+  if (hasCraft) {
+    await sleep(6000)
+    note(`drone window in the fight: ${JSON.stringify(await craftWindow())}`)
+    await shoot('drones')
+    await page.click('.arena [data-craft="recall"]')
+    await sleep(8000)
+    note(`drone window after Recall: ${JSON.stringify(await craftWindow())}`)
+  }
   note(`overview: ${await page.evaluate(() => [...document.querySelectorAll('.overview tbody tr')].map((e) => e.className.split(' ')[0] + ' ' + e.textContent.trim().replace(/\s+/g, ' ')).join(' | '))}`)
   note(`hud: ${await page.evaluate(() => [document.querySelector('[data-el="layers"]')?.textContent, document.querySelector('[data-el="selRange"]')?.textContent, ...[...document.querySelectorAll('.combat-log li')].map((l) => l.textContent)].join(' | '))}`)
   if (state === 'ready') {
