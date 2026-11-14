@@ -1085,7 +1085,7 @@ html.in-arena {
   color: var(--muted);
 }
 
-.combat-log .note {
+.combat-log .info {
   color: var(--warn);
 }
 

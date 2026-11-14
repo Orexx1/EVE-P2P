@@ -507,16 +507,16 @@ export class Hud {
     }
     for (const event of events) {
       if (event.t === 'note') {
-        push(event.text, 'note')
+        push(event.text, 'info')
       } else if (event.t === 'dead') {
         const who = entities[event.who]
         if (!who) continue
         if (who.kind !== 'ship') {
           // A drone or squadron lost: only its owner and whoever was near enough to care are told.
-          if (who.owner === me) push(`Your ${who.name} ${who.kind === 'fighter' ? 'squadron ' : ''}has been destroyed.`, 'note')
-          else if (who.team !== this.session.myTeam) push(`${who.name} destroyed.`, 'note')
+          if (who.owner === me) push(`Your ${who.name} ${who.kind === 'fighter' ? 'squadron ' : ''}has been destroyed.`, 'info')
+          else if (who.team !== this.session.myTeam) push(`${who.name} destroyed.`, 'info')
         } else {
-          push(event.who === me ? 'Your ship has been destroyed.' : `${who.name} destroyed.`, 'note')
+          push(event.who === me ? 'Your ship has been destroyed.' : `${who.name} destroyed.`, 'info')
         }
       } else if (!mineIs(event.from) && !mineIs(event.to)) {
         continue
@@ -580,7 +580,7 @@ export class Hud {
       list = chosen.length ? chosen : out.length ? out : act === 'engage' ? [...this.launchable(bay, out)] : []
     }
     if (!list.length) {
-      this.push(act === 'launch' ? 'Nothing left to launch.' : act === 'goto' ? 'No squadrons to send.' : 'Nothing in space to give that order to.', 'note')
+      this.push(act === 'launch' ? 'Nothing left to launch.' : act === 'goto' ? 'No squadrons to send.' : 'Nothing in space to give that order to.', 'info')
       this.el.log.innerHTML = this.log.map((line) => `<li class="${line.cls}">${esc(line.text)}</li>`).join('')
       return
     }
