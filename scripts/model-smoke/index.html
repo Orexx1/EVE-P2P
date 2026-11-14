@@ -68,6 +68,15 @@
             last = step
           })
           log('ship fetched:', ship && ship.constructor && ship.constructor.name)
+          // The default camera sits inside the hull; pull back to frame it.
+          let fit = null
+          try {
+            fit = tny.camera.FitToScreen(ship, { margin: 1.3 })
+          } catch (err) {
+            log('camera fit failed:', err && (err.message || err.name))
+          }
+          if (!fit) tny.camera.distance = 3000
+          log('camera fit:', JSON.stringify(fit), 'distance now', tny.camera.distance)
           window.__state = 'loaded'
         } catch (err) {
           if (unknown && guessed.length < 25 && !guessed.some((g) => g[0] === unknown[0] && g[1] === unknown[1])) {

@@ -58,7 +58,7 @@ while (Date.now() < deadline) {
 }
 note(`final state: ${state}`)
 // Let textures and shaders that are still streaming in land before the picture.
-await new Promise((r) => setTimeout(r, state === 'loaded' ? 20_000 : 3_000))
+await new Promise((r) => setTimeout(r, state === 'loaded' ? 12_000 : 3_000))
 note(`responses by host: ${JSON.stringify(hosts)}`)
 
 await mkdir(outDir, { recursive: true })
