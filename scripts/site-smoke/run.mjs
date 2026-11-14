@@ -62,11 +62,13 @@ try {
   await page.waitForFunction(() => !document.querySelector('#load')?.disabled, { timeout: 60_000 })
   await page.click(`[data-sample="${process.env.FIT || 0}"]`)
   await page.waitForSelector('.duel:not([hidden]) [data-act="solo"]', { timeout: 20_000 })
+  // A target that does not shoot back, so the ship is still there for the pictures.
+  await page.click('#spar')
   await page.click('[data-act="solo"]')
   await page.waitForSelector('.arena .hud', { timeout: 30_000 })
   await sleep(1500)
   // Get moving and lock up, so the pictures show a fight and not just a ship.
-  await page.select('.arena [data-el="orbitRange"]', '7500')
+  await page.select('.arena [data-el="orbitRange"]', '1000')
   await page.click('.arena [data-act="orbit"]')
   await page.click('.arena [data-el="lock"]')
   await shoot('standin')

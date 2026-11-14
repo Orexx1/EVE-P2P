@@ -283,8 +283,17 @@ export class HostSession extends Session {
   private combat: Combat
   private forGuest: CombatEvent[] = []
 
-  /** Pass no channel to fly solo against a scripted opponent. */
-  constructor(players: [Player, Player], private channel: Channel | null, roomCode: string | null, dataset: FittingDataset) {
+  /**
+   * Pass no channel to fly solo against a scripted opponent. With `sparring`
+   * off, that opponent only flies: a target to measure a fit against.
+   */
+  constructor(
+    players: [Player, Player],
+    private channel: Channel | null,
+    roomCode: string | null,
+    dataset: FittingDataset,
+    private sparring = true,
+  ) {
     super(0, players, roomCode)
     this.loadouts = [buildLoadout(players[0].fit, dataset, players[0].spec.radius), buildLoadout(players[1].fit, dataset, players[1].spec.radius)]
     // Both ships start with every module off, as if they had just undocked.
@@ -377,7 +386,7 @@ export class HostSession extends Session {
     const combat = this.combat
     const ship = combat.ships[1]
     const stats = combat.stats[1]
-    if (ship.dead) return
+    if (ship.dead || !this.sparring) return
     if (ship.lock === LOCK_NONE) combat.command(1, { c: 'lock' }, this.world)
     if (ship.lock !== LOCK_LOCKED) return
     stats.modules.forEach((m, i) => {

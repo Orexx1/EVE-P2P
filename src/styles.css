@@ -228,6 +228,10 @@ button.link {
   cursor: pointer;
 }
 
+.duel label.check + label.check {
+  margin-top: 0.5rem;
+}
+
 .duel label.check input {
   width: 1.125rem;
   height: 1.125rem;

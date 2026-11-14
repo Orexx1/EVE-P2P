@@ -31,6 +31,10 @@ export function createLobby(host: HTMLElement): Lobby {
           <button type="button" data-act="join">Join room</button>
         </div>
         <label class="check">
+          <input type="checkbox" id="spar" checked />
+          Solo practice target fights back
+        </label>
+        <label class="check">
           <input type="checkbox" id="models" />
           Real ship models (heavier to load; turn off if the fight stutters)
         </label>
@@ -164,7 +168,8 @@ export function createLobby(host: HTMLElement): Lobby {
 
   function solo() {
     const mine = me()
-    void launch(new HostSession([mine, { pilot: 'Practice target', fit: mine.fit, spec: { ...mine.spec } }], null, null, current!.dataset))
+    const sparring = host.querySelector<HTMLInputElement>('#spar')!.checked
+    void launch(new HostSession([mine, { pilot: 'Practice target', fit: mine.fit, spec: { ...mine.spec } }], null, null, current!.dataset, sparring))
   }
 
   host.addEventListener('click', (event) => {
