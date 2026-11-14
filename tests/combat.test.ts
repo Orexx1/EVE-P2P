@@ -256,6 +256,26 @@ describe('fits in a fight', () => {
     expect(b.damageDealt).toBeGreaterThan(1_000)
   })
 
+  it('triples an ancillary armor repairer while its paste lasts', () => {
+    const eft = '[Punisher, test]\nSmall Ancillary Armor Repairer, Nanite Repair Paste\n'
+    const loadout = buildLoadout(loadFit(eft, dataset), dataset, 50)
+    const stats = computeStats(loadout, none, loadout, none, 3_000)
+    const repairer = stats.modules[0]
+    expect(repairer).toMatchObject({ kind: 'armorRep', charges: 8, boost: 3, autoReload: false })
+    const combat = new Combat([stats, structuredClone(stats)], seeded())
+    const world = createWorld(3_000)
+    const ship = combat.ships[0]
+    ship.hp[1] = 0
+    combat.command(0, { c: 'mod', i: 0, on: true }, world)
+    for (let t = 0; t < repairer.cycle + 0.05; t += 0.1) combat.tick(world, 0.1)
+    expect(ship.hp[1]).toBeCloseTo(repairer.amount * 3, 3)
+    // Burn the remaining paste, then one more cycle repairs the plain amount.
+    ship.modules[0].charges = 0
+    const before = ship.hp[1]
+    for (let t = 0; t < repairer.cycle * 2 + 0.05; t += 0.1) combat.tick(world, 0.1)
+    expect(ship.hp[1] - before).toBeCloseTo(repairer.amount * 3 + repairer.amount, 3)
+  })
+
   it('sends drones out, lets them fight, and brings them home', () => {
     const duel = new Duel('Caracal', 'Rifter')
     expect(duel.combat.stats[0].drones[0]).toMatchObject({ name: 'Warrior II', count: 2, sigRes: 25 })

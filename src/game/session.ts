@@ -197,7 +197,7 @@ function readOwnView(raw: unknown, slots: number): OwnView | null {
     jammed: num(o.jammed),
     modules: Array.from({ length: slots }, (_, i) => {
       const m = (modules[i] ?? {}) as Record<string, unknown>
-      return { on: m.on === true, wanted: m.wanted === true, left: num(m.left), total: num(m.total, 1), charges: num(m.charges), reloading: num(m.reloading) }
+      return { on: m.on === true, wanted: m.wanted === true, left: num(m.left), total: num(m.total, 1), charges: num(m.charges), reloading: num(m.reloading), power: num(m.power, 1) }
     }),
     drones: { state: DRONE_STATES.find((s) => s === drones.state) ?? 'bay', timer: num(drones.timer) },
     effects: Array.isArray(o.effects) ? o.effects.filter((e): e is string => typeof e === 'string').slice(0, 12).map((e) => e.slice(0, 60)) : [],

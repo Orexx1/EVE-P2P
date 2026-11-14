@@ -35,6 +35,20 @@ const EFFECT_KIND: Record<number, ModuleKind> = {
 }
 const MWD_EFFECT = 6730
 const ANCILLARY_SHIELD_EFFECT = 4936
+const ANCILLARY_ARMOR_EFFECT = 5275
+// Activatable modules that act on the ship itself but do nothing a duel can show.
+const NO_EFFECT_GROUPS = new Set([
+  'Burst Jammer',
+  'Automated Targeting System',
+  'Micro Jump Drive',
+  'Micro Jump Field Generators',
+  'Cynosural Field Generator',
+  'Clone Vat Bay',
+  'Burst Projectors',
+  'Super Weapon',
+  'Titan Phenomena Generator',
+  'Compressors',
+])
 const ENERGY_WEAPON_GROUP = 53
 
 const A = {
@@ -54,6 +68,7 @@ const A = {
   explosionDelay: 281,
   flyRange: 416,
   shieldRechargeRate: 479,
+  chargedArmorMultiplier: 1886,
   cruiseSpeed: 508,
   sigResolution: 620,
   damageReductionFactor: 1353,
@@ -91,7 +106,8 @@ function classify(type: SdeType, dataset: FittingDataset): Slot {
   if (!isActivatableModule(type, dataset.effects) || !effect?.durationAttributeID) return { kind: 'passive', effect: null, type }
   // Anything left that needs a target is remote assistance or a effect this
   // sandbox does not model; anything else acts on the ship itself.
-  return { kind: effect.effectCategoryID === 2 ? 'unsupported' : 'self', effect, type }
+  const inert = effect.effectCategoryID === 2 || NO_EFFECT_GROUPS.has(dataset.groups.get(type.groupID)?.name ?? '')
+  return { kind: inert ? 'unsupported' : 'self', effect, type }
 }
 
 export function buildLoadout(loaded: LoadedFit, dataset: FittingDataset, radius: number): Loadout {
@@ -188,8 +204,19 @@ export function computeStats(own: Loadout, on: boolean[], hostile: Loadout, host
         return moduleStats({ ...base, ...timing, mwd: effect.id === MWD_EFFECT, affectsOwn: true })
       case 'self':
         return moduleStats({ ...base, ...timing, affectsOwn: true })
-      case 'armorRep':
-        return moduleStats({ ...base, ...timing, amount: attr(A.armorDamageAmount) })
+      case 'armorRep': {
+        // An ancillary repairer triples its repair while it has paste, then carries on without.
+        const charges = effect.id === ANCILLARY_ARMOR_EFFECT ? loads() : 0
+        return moduleStats({
+          ...base,
+          ...timing,
+          amount: attr(A.armorDamageAmount),
+          charges,
+          reload,
+          autoReload: false,
+          boost: charges > 0 ? attr(A.chargedArmorMultiplier, 3) : 1,
+        })
+      }
       case 'hullRep':
         return moduleStats({ ...base, ...timing, amount: attr(A.structureDamageAmount) })
       case 'shieldBoost': {

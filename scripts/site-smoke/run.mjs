@@ -53,7 +53,7 @@ const shots = []
 const shoot = async (name) => {
   await mkdir(outDir, { recursive: true })
   await page.screenshot({ path: path.join(outDir, `${name}.png`) })
-  shots.push([name, await page.screenshot({ type: 'jpeg', quality: 60, encoding: 'base64' })])
+  shots.push([name, await page.screenshot({ type: 'jpeg', quality: 55, encoding: 'base64' })])
 }
 
 let state = 'not started'
@@ -107,8 +107,13 @@ note(`responses by host: ${JSON.stringify(hosts)}`)
 for (const [text, count] of seen) if (count > 1) note(`(x${count}) ${text}`)
 await mkdir(outDir, { recursive: true })
 await writeFile(path.join(outDir, 'log.txt'), lines.join('\n'))
-// The pictures, inline, for environments that can read the log but not artifacts.
-for (const [name, data] of shots) console.log(`SCREENSHOT_JPEG_BASE64[${name}]:${data}`)
+// The pictures, inline, for environments that can read the log but not
+// artifacts. Long log lines get dropped, so each picture is split into chunks:
+// join the chunks of one name in order and base64-decode the result.
+for (const [name, data] of shots) {
+  const chunks = data.match(/.{1,6000}/g) ?? []
+  chunks.forEach((chunk, i) => console.log(`SHOT[${name}][${String(i).padStart(3, '0')}]:${chunk}`))
+}
 
 await browser.close()
 server.close()

@@ -64,6 +64,10 @@ export interface ModuleStats {
   charges: number
   /** Seconds to reload. */
   reload: number
+  /** False for modules that keep running, unboosted, once their charges are gone. */
+  autoReload: boolean
+  /** How much stronger a cycle is while it has a charge to burn (ancillary armor repairers). */
+  boost: number
   chargeName: string
   /** Hit points repaired, capacitor injected, or capacitor drained per cycle. */
   amount: number
@@ -98,6 +102,8 @@ export function moduleStats(partial: Partial<ModuleStats> & Pick<ModuleStats, 'k
     flightTime: 0,
     charges: 0,
     reload: 0,
+    autoReload: true,
+    boost: 1,
     chargeName: '',
     amount: 0,
     jam: null,
@@ -159,6 +165,8 @@ export interface ModuleRun {
   charges: number
   /** Seconds of reload left; 0 when not reloading. */
   reloading: number
+  /** Strength of the current cycle: above 1 when it burned a boosting charge. */
+  power: number
 }
 
 export const LOCK_NONE = 0
@@ -294,7 +302,7 @@ function freshShip(stats: ShipStats): ShipCombat {
     lockLeft: 0,
     lockTotal: 0,
     jammed: 0,
-    modules: stats.modules.map((m) => ({ on: false, wanted: false, left: 0, total: m.cycle, charges: m.charges, reloading: 0 })),
+    modules: stats.modules.map((m) => ({ on: false, wanted: false, left: 0, total: m.cycle, charges: m.charges, reloading: 0, power: 1 })),
     drones: { state: 'bay', timer: 0, cycle: 0 },
     dead: false,
     damageDealt: 0,
@@ -496,14 +504,18 @@ export class Combat {
       }
     }
     if (spec.mwd && this.applies(other(side), 'scram')) return 'You are warp scrambled: the microwarpdrive will not start.'
-    if (spec.charges > 0 && run.charges <= 0) {
+    if (spec.charges > 0 && run.charges <= 0 && spec.autoReload) {
       run.reloading = Math.max(spec.reload, 0.1)
       return null
     }
     if (ship.cap < spec.capNeed) return `${spec.name}: not enough capacitor.`
 
     ship.cap -= spec.capNeed
-    if (spec.charges > 0) run.charges--
+    run.power = 1
+    if (spec.charges > 0 && run.charges > 0) {
+      run.charges--
+      run.power = spec.boost
+    }
     const wasOn = run.on
     run.on = true
     run.left = run.total = spec.cycle
@@ -527,7 +539,7 @@ export class Combat {
     if (run.on) {
       run.left -= dt
       if (run.left > 1e-9) return
-      this.onCycleEnd(side, spec)
+      this.onCycleEnd(side, spec, run)
       if (!run.wanted) return this.switchOff(side, i)
       // Roll straight into the next cycle; the stats only change if it cannot.
       const refusal = this.tryStart(side, i, world, distance)
@@ -616,9 +628,9 @@ export class Combat {
     }
   }
 
-  private onCycleEnd(side: 0 | 1, spec: ModuleStats) {
+  private onCycleEnd(side: 0 | 1, spec: ModuleStats, run: ModuleRun) {
     const ship = this.ships[side]
-    if (spec.kind === 'armorRep') ship.hp[1] = Math.min(this.stats[side].hp[1], ship.hp[1] + spec.amount)
+    if (spec.kind === 'armorRep') ship.hp[1] = Math.min(this.stats[side].hp[1], ship.hp[1] + spec.amount * run.power)
     if (spec.kind === 'hullRep') ship.hp[2] = Math.min(this.stats[side].hp[2], ship.hp[2] + spec.amount)
   }
 
