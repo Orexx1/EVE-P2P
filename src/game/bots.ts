@@ -64,6 +64,11 @@ export function runBot(combat: Combat, world: World, index: number, fights = tru
     if (m.kind === 'shieldBoost') want = ship.hp[0] < stats.hp[0] * 0.8
     if (m.kind === 'hullRep') want = ship.hp[2] < stats.hp[2] * 0.9
     if (m.kind === 'capBooster') want = ship.cap < stats.capMax * 0.5
+    // A siege module roots the ship for five minutes: only once the target is inside the guns' reach.
+    if (m.name.startsWith('Siege Module')) {
+      const weapon = stats.modules.find((w) => w.damage)
+      want = run.on || (!!weapon && dist(world.ships[index].pos, world.ships[target].pos) <= weapon.range + weapon.falloff)
+    }
     // A doomsday is for capital ships, and fires once: asking again while it cools down would queue another.
     if (m.kind === 'doomsday') want = !run.on && combat.stats[target].signature >= CAPITAL_SIGNATURE && ship.cap >= m.capNeed
     if (want !== run.wanted) combat.command(index, { c: 'mod', i, on: want }, world)

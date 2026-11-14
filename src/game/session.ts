@@ -35,7 +35,7 @@ import { createWorld, parseOrder, step, type Order, type ShipSpec, type World } 
 import { runBot } from './bots'
 import { buildLoadout, computeStats, projects, type Loadout, type Projection } from './loadout'
 
-const PROTOCOL = 6
+const PROTOCOL = 7
 const STEP_SECONDS = 0.1
 const MAX_EFT_LENGTH = 20_000
 const MAX_PILOT_LENGTH = 32
@@ -263,6 +263,8 @@ export interface OwnView {
   modules: ModuleRun[]
   /** The pilot's drones and squadrons, in the order of `Session.myCraft`. */
   craft: CraftView[]
+  /** How hot the high, mid and low racks are, 0 to 1. */
+  heat: [number, number, number]
   /** Drones attack whoever attacks the ship; and when they choose for themselves, they all choose the same target. */
   aggressive: boolean
   focus: boolean
@@ -333,6 +335,7 @@ function ownView(combat: Combat, index: number): OwnView {
     jammed: ship.jammed,
     modules: ship.modules.map((m) => ({ ...m })),
     craft: combat.craftOf(index).map((i) => craftView(combat, i)),
+    heat: [...ship.heat],
     aggressive: ship.aggressive,
     focus: ship.focus,
     effects: [...effects],
@@ -373,6 +376,53 @@ const triple = (x: unknown): [number, number, number] => {
 }
 const lockOf = (x: unknown): LockState => (x === 1 || x === 2 ? x : 0)
 const CRAFT_STATES: CraftView['state'][] = ['bay', 'idle', 'engage', 'recall', 'dead']
+
+// A snapshot goes out ten times a second, so it is sent as short rows of
+// numbers and not as objects that spell out every field's name each time.
+const ON = 1
+const WANTED = 2
+const HOT = 4
+const HEATED = 8
+const BURNT = 16
+const DEAD = 4
+const AWAY = 8
+const row = (x: unknown): unknown[] => (Array.isArray(x) ? x : [])
+
+/** Rounds every number in a message. Nothing a pilot sees needs more than four decimal places. */
+export function trim<T>(value: T, places = 4): T {
+  if (typeof value === 'number') return (Number.isFinite(value) ? round(value, places) : 0) as T
+  if (Array.isArray(value)) return value.map((item) => trim(item, places)) as T
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, trim(item, places)])) as T
+  return value
+}
+
+/** A pilot's own view as it crosses the wire. */
+function packOwn(view: OwnView) {
+  return {
+    ...view,
+    locks: view.locks.map((l) => [l.target, l.left, l.total]),
+    modules: view.modules.map((m) => [
+      (m.on ? ON : 0) | (m.wanted ? WANTED : 0) | (m.hot ? HOT : 0) | (m.heated ? HEATED : 0) | (m.burnt ? BURNT : 0),
+      Math.max(0, m.left),
+      m.total,
+      m.charges,
+      m.reloading,
+      m.power,
+      m.target,
+      m.damage,
+    ]),
+    craft: view.craft.map((c) => [
+      CRAFT_STATES.indexOf(c.state),
+      c.target,
+      c.alive,
+      ...c.hp,
+      c.refuel,
+      c.abilities.map((a) => [a.on ? 1 : 0, Math.max(0, a.left), a.cooldown, a.boost, a.charges]),
+    ]),
+  }
+}
+
+const packSights = (all: Sight[]) => all.map((s) => [...s.hp, s.lock | (s.dead ? DEAD : 0) | (s.away ? AWAY : 0)])
 const round = (x: number, places = 1) => Math.round(x * 10 ** places) / 10 ** places
 
 /** Reads a view the host sent, tolerating anything missing or malformed. */
@@ -389,38 +439,45 @@ function readOwnView(raw: unknown, slots: number, count: number, craft: CraftSta
     capMax: num(o.capMax),
     locks: (Array.isArray(o.locks) ? o.locks : [])
       .slice(0, 16)
-      .map((l: Record<string, unknown> | null) => ({ target: shipIndex(l?.target), left: num(l?.left), total: num(l?.total, 1) }))
+      .map((l) => row(l))
+      .map((l) => ({ target: shipIndex(l[0]), left: num(l[1]), total: num(l[2], 1) }))
       .filter((l) => l.target >= 0),
     active: shipIndex(o.active),
     jammed: num(o.jammed),
     modules: Array.from({ length: slots }, (_, i) => {
-      const m = (modules[i] ?? {}) as Record<string, unknown>
+      const m = row(modules[i])
+      const flags = num(m[0])
       return {
-        on: m.on === true,
-        wanted: m.wanted === true,
-        left: num(m.left),
-        total: num(m.total, 1),
-        charges: num(m.charges),
-        reloading: num(m.reloading),
-        power: num(m.power, 1),
-        target: shipIndex(m.target),
+        on: (flags & ON) !== 0,
+        wanted: (flags & WANTED) !== 0,
+        left: num(m[1]),
+        total: num(m[2], 1),
+        charges: num(m[3]),
+        reloading: num(m[4]),
+        power: num(m[5], 1),
+        target: shipIndex(m[6]),
+        hot: (flags & HOT) !== 0,
+        heated: (flags & HEATED) !== 0,
+        damage: num(m[7]),
+        burnt: (flags & BURNT) !== 0,
       }
     }),
     craft: craft.map((stats, n): CraftView => {
-      const c = (sent[n] ?? {}) as Record<string, unknown>
-      const abilities = Array.isArray(c.abilities) ? c.abilities : []
+      const c = row(sent[n])
+      const abilities = row(c[7])
       return {
-        state: CRAFT_STATES.find((state) => state === c.state) ?? 'bay',
-        target: shipIndex(c.target),
-        alive: num(c.alive, stats.size),
-        hp: triple(c.hp),
-        refuel: num(c.refuel),
+        state: CRAFT_STATES[num(c[0])] ?? 'bay',
+        target: shipIndex(c[1]),
+        alive: num(c[2], stats.size),
+        hp: triple(c.slice(3, 6)),
+        refuel: num(c[6]),
         abilities: stats.abilities.map((_, k) => {
-          const a = (abilities[k] ?? {}) as Record<string, unknown>
-          return { on: a.on === true, left: num(a.left), cooldown: num(a.cooldown), boost: num(a.boost), charges: num(a.charges) }
+          const a = row(abilities[k])
+          return { on: a[0] === 1, left: num(a[1]), cooldown: num(a[2]), boost: num(a[3]), charges: num(a[4]) }
         }),
       }
     }),
+    heat: triple(o.heat),
     aggressive: o.aggressive !== false,
     focus: o.focus !== false,
     effects: Array.isArray(o.effects) ? o.effects.filter((e): e is string => typeof e === 'string').slice(0, 12).map((e) => e.slice(0, 60)) : [],
@@ -429,7 +486,11 @@ function readOwnView(raw: unknown, slots: number, count: number, craft: CraftSta
 
 function readSights(raw: unknown, count: number): Sight[] | null {
   if (!Array.isArray(raw) || raw.length !== count) return null
-  return raw.map((item: Record<string, unknown> | null) => ({ hp: triple(item?.hp), lock: lockOf(item?.lock), dead: item?.dead === true, away: item?.away === true }))
+  return raw.map((item) => {
+    const s = row(item)
+    const flags = num(s[3])
+    return { hp: triple(s), lock: lockOf(flags & 3), dead: (flags & DEAD) !== 0, away: (flags & AWAY) !== 0 }
+  })
 }
 
 function readEvent(raw: unknown, count: number): CombatEvent | null {
@@ -654,6 +715,8 @@ export class HostSession extends Session {
           this.loadouts[index],
           ship.modules.map((m) => m.on),
           projections,
+          ship.modules.map((m) => m.hot),
+          ship.modules.map((m) => m.burnt),
         ),
       )
     })
@@ -745,12 +808,13 @@ export class HostSession extends Session {
   private broadcast() {
     if (!this.channel) return
     const combat = this.combat
-    this.channel.send({
+    this.channel.send(trim({
       t: 'snap',
       time: this.world.time,
       started: this.started,
       ready: this.ready,
-      ships: this.players.map((_, i) => ({ p: this.world.ships[i].pos, v: this.world.ships[i].vel })),
+      // Where each ship is and how fast it is going, to the centimetre.
+      ships: this.players.map((_, i) => [...this.world.ships[i].pos, ...this.world.ships[i].vel].map((x) => round(x, 2))),
       // Drones and squadrons in space: where each is, how fast, and its shield, armor and hull.
       craft: this.sights.flatMap((sight, i) => {
         if (i < this.players.length || sight.dead) return []
@@ -760,13 +824,13 @@ export class HostSession extends Session {
       // Each pilot only learns their own order, as in game.
       order: this.world.ships[1].order,
       nav: this.players.map((p) => [p.spec.maxVelocity, p.spec.mass, p.spec.agility]),
-      own: ownView(combat, 1),
-      sights: sights(combat, 1).slice(0, this.players.length),
+      own: packOwn(ownView(combat, 1)),
+      sights: packSights(sights(combat, 1).slice(0, this.players.length)),
       events: this.forGuest.splice(0),
       links: this.links.map(([from, to, kind]) => [from, to, LINK_KINDS.indexOf(kind)]),
       wave: this.wave,
       winner: combat.winner,
-    })
+    }))
   }
 
   order(order: Order) {
@@ -819,8 +883,8 @@ export class GuestSession extends Session {
     const msg = raw as Record<string, unknown> | null
     const count = this.players.length
     if (msg?.t !== 'snap' || !Array.isArray(msg.ships) || msg.ships.length !== count) return
-    const ships = msg.ships as Array<{ p?: unknown; v?: unknown }>
-    if (!ships.every((s) => isVec3(s?.p) && isVec3(s?.v))) return
+    const ships = (msg.ships as unknown[]).map((s) => ({ p: row(s).slice(0, 3), v: row(s).slice(3, 6) }))
+    if (!ships.every((s) => isVec3(s.p) && isVec3(s.v))) return
     if (typeof msg.time !== 'number' || !Number.isFinite(msg.time)) return
     ships.forEach((s, i) => {
       this.world.ships[i].pos = s.p as World['ships'][0]['pos']

@@ -192,7 +192,7 @@ Warrior II x5`,
 Damage Control II
 Gyrostabilizer II
 Gyrostabilizer II
-Gyrostabilizer II
+25000mm Steel Plates II
 Capital Armor Repairer II
 Multispectrum Energized Membrane II
 Multispectrum Energized Membrane II
@@ -221,7 +221,7 @@ Capital Trimark Armor Pump II`,
 Damage Control II
 Magnetic Field Stabilizer II
 Magnetic Field Stabilizer II
-Magnetic Field Stabilizer II
+25000mm Steel Plates II
 Capital Armor Repairer II
 Multispectrum Energized Membrane II
 Multispectrum Energized Membrane II
@@ -359,7 +359,128 @@ Tyrfing II x12`,
 Damage Control II
 Heat Sink II
 Heat Sink II
+25000mm Steel Plates II
+25000mm Steel Plates II
+Multispectrum Energized Membrane II
+Multispectrum Energized Membrane II
+Capital Armor Repairer II
+
+10000MN Afterburner II
+Capital Capacitor Booster II, Navy Cap Booster 3200
+Sensor Booster II
+
+Dual Giga Pulse Laser II, Scorch XL
+Dual Giga Pulse Laser II, Scorch XL
+Dual Giga Pulse Laser II, Scorch XL
+Dual Giga Pulse Laser II, Scorch XL
+Dual Giga Pulse Laser II, Scorch XL
+Dual Giga Pulse Laser II, Scorch XL
+'Judgment' Electromagnetic Doomsday
+
+Capital Trimark Armor Pump II
+Capital Trimark Armor Pump II
+Capital Trimark Armor Pump II`,
+  // Dreadnoughts with siege modules: ten times the damage and twice the repair, and they cannot move while sieged.
+  morosSiege: `[Moros, Siege]
+Damage Control II
+Magnetic Field Stabilizer II
+Magnetic Field Stabilizer II
+Capital Armor Repairer II
+25000mm Steel Plates II
+Multispectrum Energized Membrane II
+Multispectrum Energized Membrane II
+
+10000MN Afterburner II
+Capital Capacitor Booster II, Navy Cap Booster 3200
+Heavy Stasis Grappler II
+Tracking Computer II
+
+Ion Siege Blaster II, Void XL
+Ion Siege Blaster II, Void XL
+Ion Siege Blaster II, Void XL
+Siege Module II
+Heavy Energy Neutralizer II`,
+  naglfarSiege: `[Naglfar, Siege]
+Damage Control II
+Gyrostabilizer II
+Gyrostabilizer II
+Tracking Enhancer II
+
+10000MN Afterburner II
+Capital Shield Booster II
+Capital Shield Extender II
+Multispectrum Shield Hardener II
+Multispectrum Shield Hardener II
+
+Hexa 2500mm Repeating Cannon II, Republic Fleet EMP XL
+Hexa 2500mm Repeating Cannon II, Republic Fleet EMP XL
+Hexa 2500mm Repeating Cannon II, Republic Fleet EMP XL
+Siege Module II`,
+  revelationSiege: `[Revelation, Siege]
+Damage Control II
 Heat Sink II
+Heat Sink II
+Capital Armor Repairer II
+Multispectrum Energized Membrane II
+Multispectrum Energized Membrane II
+
+10000MN Afterburner II
+Capital Capacitor Booster II, Navy Cap Booster 3200
+Tracking Computer II
+
+Dual Giga Pulse Laser II, Scorch XL
+Dual Giga Pulse Laser II, Scorch XL
+Dual Giga Pulse Laser II, Scorch XL
+Siege Module II`,
+  // Supercarriers with a full buffer, for flying against a titan: one doomsday must not be the end of them.
+  nyxFleet: `[Nyx, Fleet]
+Damage Control II
+Drone Damage Amplifier II
+Drone Damage Amplifier II
+25000mm Steel Plates II
+25000mm Steel Plates II
+Multispectrum Energized Membrane II
+Multispectrum Energized Membrane II
+
+10000MN Afterburner II
+Sensor Booster II
+
+Fighter Support Unit II
+Fighter Support Unit II
+
+Capital Trimark Armor Pump II
+Capital Trimark Armor Pump II
+Capital Trimark Armor Pump II
+
+
+Firbolg II x18
+Cyclops II x12`,
+  helFleet: `[Hel, Fleet]
+Damage Control II
+Drone Damage Amplifier II
+Drone Damage Amplifier II
+
+10000MN Afterburner II
+Capital Shield Extender II
+Capital Shield Extender II
+Capital Shield Extender II
+Multispectrum Shield Hardener II
+Multispectrum Shield Hardener II
+
+Fighter Support Unit II
+Fighter Support Unit II
+
+Capital Core Defense Field Extender II
+Capital Core Defense Field Extender II
+Capital Core Defense Field Extender II
+
+
+Einherji II x18
+Tyrfing II x12`,
+  erebus: `[Erebus, Titan]
+Damage Control II
+Magnetic Field Stabilizer II
+Magnetic Field Stabilizer II
 25000mm Steel Plates II
 Multispectrum Energized Membrane II
 Multispectrum Energized Membrane II
@@ -370,13 +491,17 @@ Capital Capacitor Booster II, Navy Cap Booster 3200
 Sensor Booster II
 Tracking Computer II
 
-Dual Giga Pulse Laser II, Scorch XL
-Dual Giga Pulse Laser II, Scorch XL
-Dual Giga Pulse Laser II, Scorch XL
-Dual Giga Pulse Laser II, Scorch XL
-Dual Giga Pulse Laser II, Scorch XL
-Dual Giga Pulse Laser II, Scorch XL
-'Judgment' Electromagnetic Doomsday`,
+Ion Siege Blaster II, Void XL
+Ion Siege Blaster II, Void XL
+Ion Siege Blaster II, Void XL
+Ion Siege Blaster II, Void XL
+Ion Siege Blaster II, Void XL
+Ion Siege Blaster II, Void XL
+'Aurora Ominae' Thermal Doomsday
+
+Capital Trimark Armor Pump II
+Capital Trimark Armor Pump II
+Capital Trimark Armor Pump II`,
 } satisfies Record<string, string>
 
 export type FitKey = keyof typeof SCENARIO_FITS
@@ -508,6 +633,55 @@ export const SCENARIOS: Scenario[] = [
     ],
   },
   {
+    id: 'carriers',
+    title: 'Carrier group',
+    brief: 'Two carriers caught by a battleship gang. Six light fighter squadrons between you: they are fast, they can be shot down, and a battleship is small enough to blunt them. Keep them on one target at a time.',
+    kind: 'challenge',
+    difficulty: 1,
+    pilots: ['thanatos', 'nidhoggur'],
+    enemies: [
+      { fit: 'apocalypse', name: 'Apocalypse', count: 3 },
+      { fit: 'hurricane', name: 'Hurricane', count: 2 },
+      { fit: 'drake', name: 'Drake', count: 2 },
+    ],
+  },
+  {
+    id: 'siege',
+    title: 'Siege line',
+    brief: 'Dreadnought against dreadnought. A siege module multiplies your damage tenfold and doubles your repairs, and roots you to the spot for five minutes: get into range before you commit.',
+    kind: 'challenge',
+    difficulty: 2,
+    pilots: ['morosSiege', 'naglfarSiege'],
+    enemies: [
+      { fit: 'revelationSiege', name: 'Revelation', count: 2 },
+      { fit: 'thanatos', name: 'Thanatos' },
+    ],
+  },
+  {
+    id: 'titandown',
+    title: 'Titan down',
+    brief: 'Two supercarriers hunting an Erebus and the carrier escorting it. Ten squadrons, heavy and light. The titan will answer with a doomsday every four minutes, and one of you will be on the end of it.',
+    kind: 'challenge',
+    difficulty: 3,
+    pilots: ['nyxFleet', 'helFleet'],
+    enemies: [
+      { fit: 'erebus', name: 'Erebus' },
+      { fit: 'archon', name: 'Archon' },
+    ],
+  },
+  {
+    id: 'clash',
+    title: 'Clash of titans',
+    brief: 'The Azariel and the Vanquisher against an Avatar and an Erebus. Four doomsdays on the field. Whoever fires first is rooted for thirty seconds while the reply builds.',
+    kind: 'challenge',
+    difficulty: 2,
+    pilots: ['azariel', 'vanquisher'],
+    enemies: [
+      { fit: 'avatar', name: 'Avatar' },
+      { fit: 'erebus', name: 'Erebus' },
+    ],
+  },
+  {
     id: 'range',
     title: 'Firing range',
     brief: 'Four empty hulls that neither move nor shoot, from a frigate at 5 km to a battleship at 40 km. For finding out what your guns, missiles and drones do at each range and to each size.',
@@ -568,6 +742,25 @@ export const SCENARIOS: Scenario[] = [
       { fit: 'drake', name: 'Drake' },
       { fit: 'apocalypse', name: 'Apocalypse' },
     ],
+  },
+  {
+    id: 'dreads',
+    title: 'Dreadnought pair',
+    brief: 'A Moros and a Naglfar that will siege as soon as you are in range. Sieged, they cannot move and cannot be outlasted by anything small: the question is whether your ship can be somewhere their guns cannot track.',
+    kind: 'sandbox',
+    difficulty: 3,
+    enemies: [
+      { fit: 'morosSiege', name: 'Moros' },
+      { fit: 'naglfarSiege', name: 'Naglfar' },
+    ],
+  },
+  {
+    id: 'titan',
+    title: 'Titan',
+    brief: 'One Avatar. Its doomsday only works on capital ships, but six capital lasers will still land on anything that flies straight at them. Get in close and keep moving across its guns.',
+    kind: 'sandbox',
+    difficulty: 3,
+    enemies: [{ fit: 'avatar', name: 'Avatar' }],
   },
   {
     id: 'super',

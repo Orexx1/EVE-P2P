@@ -448,7 +448,57 @@ html.in-arena {
   border-bottom: 1px solid rgb(255 255 255 / 0.09);
 }
 
+/* Tap a window's title strip to fold it down to the strip, and again to bring it back. */
+.panel-head[data-fold] {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.panel-head[data-fold] h2::before {
+  content: '';
+  display: inline-block;
+  width: 0;
+  height: 0;
+  margin-right: 0.3125rem;
+  border: 0.25rem solid transparent;
+  border-bottom: 0;
+  border-top: 0.3125rem solid currentColor;
+  vertical-align: 0.0625rem;
+  transition: transform 0.12s;
+}
+
+[data-folded] > .panel-head[data-fold] h2::before {
+  transform: rotate(-90deg);
+}
+
+.panel[data-folded] > :not(.panel-head) {
+  display: none;
+}
+
+.panel[data-folded] > .panel-head {
+  margin-bottom: -0.5rem;
+  border-bottom: 0;
+}
+
+.craft[data-folded] > .panel-head {
+  margin-bottom: -0.3125rem;
+}
+
+/* What the selected item is, shown in its strip only while the window is folded. */
+.fold-note {
+  display: none;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+[data-folded] > .panel-head .fold-note {
+  display: block;
+}
+
 .hud .panel-head h2 {
+  flex: none;
   font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -871,7 +921,97 @@ html.in-arena {
 
 .rack-row {
   display: flex;
+  align-items: center;
   gap: 0.1875rem;
+}
+
+/* The button at the head of a rack: overheats the whole rack, and fills from the bottom as the rack heats up. */
+.arena .rack-heat {
+  position: relative;
+  align-self: stretch;
+  width: 0.6875rem;
+  min-height: 0;
+  padding: 0;
+  border-radius: 2px;
+  background: rgb(11 16 22 / 0.86);
+  border-color: rgb(255 255 255 / 0.2);
+  overflow: hidden;
+}
+
+.rack-heat.none {
+  visibility: hidden;
+  border: 1px solid transparent;
+}
+
+.rack-heat span {
+  position: absolute;
+  inset: auto 0 0;
+  height: 0;
+  background: linear-gradient(#ffcf5a, #ff7a2a);
+  transition: height 0.2s linear;
+}
+
+.arena .rack-heat[aria-pressed='true'] {
+  border-color: #ff9a3c;
+  box-shadow: 0 0 0.375rem -0.0625rem #ff7a2a;
+}
+
+.rack-heat.danger span {
+  background: linear-gradient(#ff8a4a, var(--hostile));
+}
+
+/* Overheated: an ember ring outside the cycle ring. */
+.arena .mod.hot {
+  box-shadow: 0 0 0 2px #ff9a3c, 0 0 0.5rem 1px rgb(255 122 42 / 0.7);
+}
+
+.arena .mod.hot.on {
+  box-shadow: 0 0 0 1px #7fe08a, 0 0 0 3px #ff9a3c, 0 0 0.5rem 2px rgb(255 122 42 / 0.7);
+}
+
+/* Heat damage: a bar under the module that fills until it burns out. */
+.mod-wear {
+  position: absolute;
+  left: 15%;
+  right: 15%;
+  bottom: -1px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgb(10 15 20 / 0.9);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.mod-wear span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--hostile);
+}
+
+.mod-wear:has(span[style*='width: 0%']) {
+  display: none;
+}
+
+.arena .mod.burnt {
+  opacity: 1;
+  box-shadow: none;
+  background: #3a1512;
+}
+
+.mod.burnt .mod-face {
+  opacity: 0.3;
+  filter: grayscale(1);
+}
+
+.mod.burnt::after {
+  content: '';
+  position: absolute;
+  inset: 22%;
+  background:
+    linear-gradient(45deg, transparent 44%, var(--hostile) 44% 56%, transparent 56%),
+    linear-gradient(-45deg, transparent 44%, var(--hostile) 44% 56%, transparent 56%);
+  pointer-events: none;
 }
 
 /* A module is a round button. Its rim fills clockwise as the cycle runs. */
@@ -954,7 +1094,7 @@ html.in-arena {
   left: max(0.5rem, env(safe-area-inset-left));
   width: 14rem;
   /* Stops short of the combat log below it. */
-  max-height: calc(100% - 15.25rem);
+  max-height: calc(100% - 16.5rem);
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
@@ -1003,14 +1143,17 @@ html.in-arena {
   color: var(--go);
 }
 
-.craft-use {
-  margin: 0;
-  font-size: 0.6875rem;
-  line-height: 1.2;
+.craft .panel-head {
+  margin: -0.3125rem -0.3125rem 0;
+  padding-left: 0.4375rem;
+  padding-right: 0.4375rem;
 }
 
-.craft-use:empty {
-  display: none;
+.craft .panel-head .sub {
+  font-size: 0.625rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .craft-list {
@@ -1448,12 +1591,41 @@ html.in-arena {
   background: var(--hull);
 }
 
-.combat-log {
+/* The combat log, with a tab above it that folds it away. */
+.log-window {
   position: absolute;
   left: max(0.5rem, env(safe-area-inset-left));
   /* Clear of the ship status panel, which can reach this far left on a phone. */
   bottom: calc(max(0.5rem, env(safe-area-inset-bottom)) + 6.5rem);
   width: min(17rem, 34vw);
+  display: grid;
+  justify-items: start;
+  gap: 0.125rem;
+  pointer-events: none;
+}
+
+.arena .log-head {
+  min-height: 0;
+  padding: 0 0.375rem;
+  font-size: 0.625rem;
+  line-height: 1.5;
+  color: var(--muted);
+  background: rgb(11 16 22 / 0.7);
+  border-color: rgb(255 255 255 / 0.13);
+  border-radius: 2px;
+  pointer-events: auto;
+}
+
+.log-window[data-folded] .combat-log {
+  display: none;
+}
+
+.log-window[data-folded] .log-head {
+  color: var(--text);
+}
+
+.combat-log {
+  width: 100%;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1586,7 +1758,7 @@ html.in-arena {
   }
 
   .craft {
-    max-height: calc(100% - 13.375rem);
+    max-height: calc(100% - 14.5rem);
   }
 }
 

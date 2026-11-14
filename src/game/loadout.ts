@@ -58,6 +58,23 @@ const NO_EFFECT_GROUPS = new Set([
 const ENERGY_WEAPON_GROUP = 53
 
 const A = {
+  overloadRof: 1205,
+  overloadDuration: 1206,
+  overloadDamage: 1210,
+  overloadSpeed: 1223,
+  overloadArmor: 1230,
+  overloadShield: 1231,
+  thrust: 567,
+  moduleHp: 9,
+  heatDamage: 1211,
+  heatRate: 1180,
+  heatGeneration: 1224,
+  heatDissipationHi: 1179,
+  heatDissipationMed: 1196,
+  heatDissipationLow: 1198,
+  heatAttenuationHi: 1259,
+  heatAttenuationMed: 1261,
+  heatAttenuationLow: 1262,
   emDamage: 114,
   explosiveDamage: 116,
   kineticDamage: 117,
@@ -87,6 +104,17 @@ const A = {
   reloadTime: 1795,
 } as const
 
+/**
+ * The fitting engine applies these overheat bonuses twice (a gun that should
+ * hit 15% harder comes out 32% harder), so a module that has one is computed
+ * as merely running and given its bonuses here, once. The other bonuses, to
+ * range, duration and hardening, the engine gets right.
+ */
+const DOUBLED_OVERLOADS = [A.overloadDamage, A.overloadRof, A.overloadSpeed, A.overloadArmor, A.overloadShield]
+const ownOverload = (type: SdeType) => type.attributes.some((a) => DOUBLED_OVERLOADS.includes(a.id as (typeof DOUBLED_OVERLOADS)[number]) && a.v !== 0)
+
+const TARGETED = new Set<ModuleKind>(['web', 'scram', 'disrupt', 'ewar', 'neut', 'nos', 'ecm'])
+
 const SENSOR_INDEX: Record<string, number> = { gravimetric: 0, ladar: 1, magnetometric: 2, radar: 3 }
 
 interface Slot {
@@ -94,6 +122,8 @@ interface Slot {
   /** The effect that runs when the module is activated. */
   effect: SdeEffect | null
   type: SdeType
+  /** The state the fit gave it, which a passive module keeps unless it burns out. */
+  state: Fit['modules'][number]['state']
 }
 
 export interface Loadout {
@@ -109,7 +139,7 @@ function effectIds(type: SdeType): Array<{ id: number; def: boolean }> {
   return raw.map((e) => (typeof e === 'number' ? { id: e, def: false } : { id: e.id, def: !!e.def }))
 }
 
-function classify(type: SdeType, dataset: FittingDataset): Slot {
+function classify(type: SdeType, dataset: FittingDataset): Omit<Slot, 'state'> {
   const ids = effectIds(type)
   const known = ids.find((e) => EFFECT_KIND[e.id])
   const chosen = known ?? ids.find((e) => e.def)
@@ -124,7 +154,7 @@ function classify(type: SdeType, dataset: FittingDataset): Slot {
 
 export function buildLoadout(loaded: LoadedFit, dataset: FittingDataset, radius: number): Loadout {
   const fit = structuredClone(loaded.fit)
-  const slots = fit.modules.map((mod) => classify(dataset.getType(mod.typeID)!, dataset))
+  const slots = fit.modules.map((mod) => ({ ...classify(dataset.getType(mod.typeID)!, dataset), state: mod.state }))
   return { fit, slots, dataset, radius }
 }
 
@@ -144,15 +174,21 @@ export const projects = (kind: ModuleKind) => kind === 'web' || kind === 'scram'
  * This ship's numbers right now: with exactly the modules in `on` running,
  * and under whatever other ships have pointed at it.
  */
-export function computeStats(own: Loadout, on: boolean[], projections: Projection[] = []): ShipStats {
+export function computeStats(own: Loadout, on: boolean[], projections: Projection[] = [], hot: boolean[] = [], burnt: boolean[] = []): ShipStats {
   const { fit, slots, dataset } = own
   fit.modules.forEach((mod, i) => {
     const kind = slots[i].kind
-    if (kind === 'passive') return
+    // A module that has burnt out is offline: it gives the ship nothing, passive or not.
+    if (burnt[i]) return void (mod.state = 'OFFLINE')
+    if (kind === 'passive') return void (mod.state = slots[i].state)
     // Weapons stay "active" for the engine so it reports their damage; their
     // running state changes nothing else about the ship.
     const weapon = kind === 'turret' || kind === 'missile' || kind === 'smartbomb'
-    mod.state = weapon || on[i] ? 'ACTIVE' : 'ONLINE'
+    // Overheated, the engine applies the module's overload bonus, except for the
+    // bonuses it is known to apply twice: those are applied below instead.
+    // A module that works on a target is given its overheated reach as soon as it is told to overheat,
+    // so that reach can be used to switch it on. Running it does nothing to this ship either way.
+    mod.state = weapon || on[i] || (hot[i] && TARGETED.has(kind)) ? (hot[i] && !ownOverload(slots[i].type) ? 'OVERLOAD' : 'ACTIVE') : 'ONLINE'
   })
   const computed = computeFit(fit, dataset, {
     skillProfile: allSkillsV(dataset),
@@ -164,12 +200,43 @@ export function computeStats(own: Loadout, on: boolean[], projections: Projectio
   const d = computed.derived
   const nameOf = (id: number | undefined) => (id === undefined ? '' : (dataset.getType(id)?.name ?? ''))
 
+  /** What an overheated propulsion module adds to top speed, over what it gives when merely running. */
+  let overdrive = 1
   const modules = fit.modules.map((mod, i): ModuleStats => {
+    const stats = build(mod, i)
+    const type = slots[i].type
+    if (!hot[i] || burnt[i] || !ownOverload(type)) return stats
+    const bonus = (id: number) => 1 + (type.attributes.find((a) => a.id === id)?.v ?? 0) / 100
+    if (stats.damage) stats.damage = stats.damage.map((x) => x * bonus(A.overloadDamage)) as Quad
+    stats.cycle *= bonus(A.overloadRof) * bonus(A.overloadDuration)
+    if (stats.kind === 'armorRep') stats.amount *= bonus(A.overloadArmor)
+    if (stats.kind === 'shieldBoost') stats.amount *= bonus(A.overloadShield)
+    if (stats.kind === 'prop' && on[i]) {
+      // Top speed is base x (1 + boost x thrust / mass): overheating raises the boost.
+      const snap = d.moduleSnapshots[mod.id]?.module
+      const boost = (((snap?.[A.speedFactor] ?? 0) / 100) * (snap?.[A.thrust] ?? 0)) / Math.max(d.navigation.mass, 1)
+      if (boost > 0) overdrive *= (1 + boost * bonus(A.overloadSpeed)) / (1 + boost)
+    }
+    return stats
+  })
+  function build(mod: Fit['modules'][number], i: number): ModuleStats {
     const { kind, effect, type } = slots[i]
     const snap = d.moduleSnapshots[mod.id]
     const attr = (id: number | undefined, fallback = 0) => (id === undefined ? fallback : (snap?.module[id] ?? fallback))
     const charge = (id: number, fallback = 0) => snap?.charge?.[id] ?? fallback
-    const base = { kind, name: type.name ?? `Type ${type.id}`, typeID: type.id, slot: mod.slotType, chargeName: nameOf(mod.chargeTypeID) }
+    const raw = (id: number) => type.attributes.find((a) => a.id === id)?.v ?? 0
+    const base = {
+      kind,
+      name: type.name ?? `Type ${type.id}`,
+      typeID: type.id,
+      slot: mod.slotType,
+      chargeName: nameOf(mod.chargeTypeID),
+      position: mod.position,
+      hp: raw(A.moduleHp) || 40,
+      heatDamage: raw(A.heatDamage),
+      heatRate: raw(A.heatRate),
+    }
+    if (burnt[i]) return moduleStats({ ...base, kind: 'unsupported', heatDamage: 0, note: `${base.name} has burnt out.` })
     if (kind === 'passive' || !effect) return moduleStats({ ...base, kind: 'passive' })
 
     const timing = {
@@ -276,11 +343,12 @@ export function computeStats(own: Loadout, on: boolean[], projections: Projectio
       default:
         return moduleStats({ ...base, kind: 'unsupported', note: `${base.name} has no effect in a duel.` })
     }
-  })
+  }
 
   const quad = (r: { em: number; thermal: number; kinetic: number; explosive: number }): Quad => [r.em, r.thermal, r.kinetic, r.explosive]
+  const shipAttr = (id: number, fallback: number) => computed.ship.get(id)?.final ?? fallback
   return {
-    maxVelocity: d.navigation.maxVelocity,
+    maxVelocity: d.navigation.maxVelocity * overdrive,
     mass: d.navigation.mass,
     agility: d.navigation.agility,
     signature: d.targeting.signatureRadius,
@@ -299,6 +367,12 @@ export function computeStats(own: Loadout, on: boolean[], projections: Projectio
     droneRange: d.drones.controlRange,
     droneBandwidth: d.drones.bandwidthMax,
     droneMax: MAX_DRONES_IN_SPACE,
+    heat: {
+      generation: shipAttr(A.heatGeneration, 1),
+      dissipation: [shipAttr(A.heatDissipationHi, 0.01), shipAttr(A.heatDissipationMed, 0.01), shipAttr(A.heatDissipationLow, 0.01)],
+      attenuation: [shipAttr(A.heatAttenuationHi, 0.5), shipAttr(A.heatAttenuationMed, 0.5), shipAttr(A.heatAttenuationLow, 0.5)],
+      slots: (['HI', 'MED', 'LO', 'RIG'] as const).reduce((sum, slot) => sum + (d.fitting.slots[slot]?.max ?? 0), 0),
+    },
   }
 }
 
@@ -480,6 +554,24 @@ function fighterStats(type: SdeType, attrs: Attributes, size: number): CraftStat
     abilities,
     note: missing.length ? `${name}: ${missing.join(' and ')} not modelled.` : '',
   })
+}
+
+/**
+ * What each fighter squadron's guns really do, by squadron id. The engine's own
+ * figure adds every volley of rockets, torpedoes and bombs to the gun cycle as if
+ * they fired with it, which reads three to seven times too high.
+ */
+export function squadronDamage(loaded: LoadedFit, dataset: FittingDataset): Map<string, { dps: number; volley: number; cycle: number }> {
+  const out = new Map<string, { dps: number; volley: number; cycle: number }>()
+  for (const squadron of loaded.fit.fighters) {
+    const type = dataset.getType(squadron.typeID)
+    const attrs = loaded.computed.fighters.get(squadron.id)?.attributes
+    if (!type || !attrs || squadron.count <= 0) continue
+    const gun = fighterStats(type, attrs, squadron.count).abilities.find((a) => a.kind === 'attack' && a.damage)
+    const volley = gun ? gun.damage!.reduce((a, b) => a + b, 0) * squadron.count : 0
+    out.set(squadron.id, { dps: gun ? volley / gun.cycle : 0, volley, cycle: gun?.cycle ?? 0 })
+  }
+  return out
 }
 
 /** Every drone in the bay as its own craft, then every fighter squadron in its tube. */

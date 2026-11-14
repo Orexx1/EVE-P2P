@@ -17,6 +17,7 @@ import {
   LOCK_LOCKING,
   LOCK_NONE,
   QUALITY,
+  RACKS,
   lockState,
   type AbilityStats,
   type Command,
@@ -77,6 +78,7 @@ const GLYPH = {
   look: glyph('<path d="M2 10c2.4-3.6 5-5.4 8-5.4s5.600 1.800 8 5.400c-2.400 3.600-5 5.400-8 5.400s-5.600-1.800-8-5.400z" /><circle cx="10" cy="10" r="2.2" class="solid" />'),
 }
 const HOSTILE_SECONDS = 8
+const FOLD_KEY = 'eve-p2p:folded'
 
 const percent = (value: number, max: number) => (max > 0 ? Math.max(0, Math.min(100, (value / max) * 100)) : 0)
 
@@ -98,13 +100,15 @@ function describe(m: ModuleStats): string {
 function moduleButton(m: ModuleStats, index: number, key = ''): string {
   const inert = m.kind === 'passive' || m.kind === 'unsupported'
   return `
-    <button type="button" class="mod ${inert ? m.kind : ''}" data-mod="${index}" title="${esc(describe(m))}${key && !inert ? ` (${key})` : ''}"
+    <button type="button" class="mod ${inert ? m.kind : ''}" data-mod="${index}"
+      title="${esc(describe(m))}${key && !inert ? ` (${key})` : ''}${m.heatDamage > 0 ? `. Hold, or Shift and click, to overheat${key ? ` (Shift+${key})` : ''}` : ''}"
       aria-label="${esc(m.name)}" aria-pressed="false"${inert ? ' disabled' : ''}>
       <span class="mod-face">
         <span class="mod-name">${esc(m.name.split(' ')[0].slice(0, 6))}</span>
         <img src="https://images.evetech.net/types/${m.typeID}/icon?size=64" alt="" loading="lazy" draggable="false" />
       </span>
       <span class="mod-count" data-count="${index}"></span>
+      <span class="mod-wear" aria-hidden="true"><span></span></span>
     </button>`
 }
 
@@ -169,6 +173,7 @@ function craftPanel(stats: CraftStats[], groups: number[][]): string {
     .join('')
   return `
       <section class="craft panel${fighters ? ' with-squadrons' : ''}" data-el="craft" aria-label="${drones && fighters ? 'Drones and fighters' : fighters ? 'Fighters' : 'Drones'}" hidden>
+        <header class="panel-head" data-fold="craft"><h2>${drones && fighters ? 'Drones and fighters' : fighters ? 'Fighters' : 'Drones'}</h2><span class="sub" data-el="craftUse"></span></header>
         <div class="craft-orders" role="group" aria-label="Orders">
           <button type="button" data-craft="launch">Launch</button>
           <button type="button" class="primary" data-craft="engage" title="Attack your active target">Engage</button>
@@ -184,7 +189,6 @@ function craftPanel(stats: CraftStats[], groups: number[][]): string {
         </div>`
             : ''
         }
-        <p class="sub craft-use" data-el="craftUse"></p>
         <ul class="craft-list" data-el="craftList">${rows}</ul>
       </section>`
 }
@@ -238,6 +242,15 @@ export class Hud {
   private shotBy: number[] = []
   private clock = 0
   private stopKeys: (() => void) | null = null
+  /** Windows the pilot has folded away, by name. Remembered from one fight to the next. */
+  private folded = new Set<string>()
+  /** Where each bracket was last put, so a bracket that has not moved is left alone. */
+  private placed: string[] = []
+  /** The markup last written into an element, so the page is only touched when it changes. */
+  private written = new Map<HTMLElement, string>()
+  private rackHeat: Array<HTMLElement | null> = []
+  /** Set when a held press has just toggled a module's heat, so the click that follows the release is not also taken as a tap. */
+  private held = false
   /** Whether the pilot picked the selected item themselves, as opposed to it being picked for them. */
   private chosenByPilot = false
   private abilities: HTMLButtonElement[][] = []
@@ -266,7 +279,11 @@ export class Hud {
       const prefix = slot === 'HI' ? '' : slot === 'MED' ? 'Alt+' : 'Ctrl+'
       let position = 0
       const buttons = rack.map((m, i) => (m.slot === slot ? moduleButton(m, i, ++position <= 8 ? `${prefix}F${position}` : '') : '')).join('')
-      return buttons ? `<div class="rack-row" role="group" aria-label="${label}">${buttons}</div>` : ''
+      // The button at the head of a rack overheats everything in it, and fills as the rack heats up.
+      const heat = rack.some((m) => m.slot === slot && m.heatDamage > 0)
+        ? `<button type="button" class="rack-heat" data-heat-rack="${slot}" aria-pressed="false" aria-label="Overheat the ${label.toLowerCase()}" title="Overheat every module in this rack. It fills as the rack heats up."><span></span></button>`
+        : '<span class="rack-heat none"></span>'
+      return buttons ? `<div class="rack-row" role="group" aria-label="${label}">${heat}${buttons}</div>` : ''
     }).join('')
 
     this.root = document.createElement('div')
@@ -304,7 +321,7 @@ export class Hud {
 
       <aside class="hud-side">
         <section class="panel selected-item" data-el="selPanel" aria-label="Selected item">
-          <header class="panel-head"><h2>Selected item</h2></header>
+          <header class="panel-head" data-fold="selected"><h2>Selected item</h2><span class="sub fold-note" data-el="selBrief"></span></header>
           <p class="sel-name" data-el="selName"></p>
           <p class="sub"><span data-el="selType"></span> <span data-el="selRange"></span></p>
           <div class="sel-actions">
@@ -320,7 +337,7 @@ export class Hud {
           </div>
         </section>
         <section class="panel overview" aria-label="Overview">
-          <header class="panel-head"><h2>Overview</h2><span class="sub" data-el="ovCount"></span></header>
+          <header class="panel-head" data-fold="overview"><h2>Overview</h2><span class="sub" data-el="ovCount"></span></header>
           <div class="overview-scroll">
             <table>
               <thead><tr><th class="ico"></th><th class="num">Distance</th><th>Name</th><th class="type">Type</th><th class="num">Speed</th></tr></thead>
@@ -341,7 +358,10 @@ export class Hud {
 
       ${craftPanel(session.craftStats, this.groups)}
 
-      <ol class="combat-log" data-el="log" aria-label="Combat log" aria-live="off"></ol>
+      <div class="log-window" data-el="logWindow">
+        <button type="button" class="log-head" data-fold="log" aria-label="Show or hide the combat log">Log</button>
+        <ol class="combat-log" data-el="log" aria-label="Combat log" aria-live="off"></ol>
+      </div>
 
       <div class="hud-bottom">
         <p class="effects" data-el="effects" role="status"></p>
@@ -388,6 +408,30 @@ export class Hud {
       ;(this.abilities[n] ??= [])[k] = node
     })
     this.cells = [...this.root.querySelectorAll<HTMLElement>('.cell')]
+    this.rackHeat = RACKS.map((slot) => this.root.querySelector<HTMLElement>(`[data-heat-rack="${slot}"]`))
+    try {
+      this.folded = new Set(JSON.parse(localStorage.getItem(FOLD_KEY) ?? '[]') as string[])
+    } catch {
+      // No storage, or nothing sensible in it: every window starts open.
+    }
+    this.applyFolds()
+    // Overheat one module: hold it down, or Shift and click. Holding suits a thumb.
+    let holding: ReturnType<typeof setTimeout> | undefined
+    const release = () => clearTimeout(holding)
+    this.root.addEventListener('pointerdown', (event) => {
+      const mod = (event.target as HTMLElement).closest<HTMLElement>('[data-mod]')?.dataset.mod
+      this.held = false
+      if (mod === undefined) return
+      holding = setTimeout(() => {
+        this.held = true
+        this.toggleHeat([Number(mod)])
+      }, 450)
+    })
+    for (const type of ['pointerup', 'pointercancel', 'pointerleave'] as const) this.root.addEventListener(type, release)
+    // A long press on a phone would otherwise bring up the browser's menu.
+    this.root.addEventListener('contextmenu', (event) => {
+      if ((event.target as HTMLElement).closest('[data-mod], [data-heat-rack]')) event.preventDefault()
+    })
     const onKey = (event: KeyboardEvent) => {
       if (this.root.hidden || (event.target as HTMLElement | null)?.closest?.('input, select, textarea')) return
       const f = /^F([1-8])$/.exec(event.key)
@@ -395,7 +439,8 @@ export class Hud {
         const slot = event.altKey ? 'MED' : event.ctrlKey ? 'LO' : 'HI'
         const index = rack.map((m, i) => (m.slot === slot ? i : -1)).filter((i) => i >= 0)[Number(f[1]) - 1]
         const run = session.own.modules[index]
-        if (run && rack[index].kind !== 'passive' && rack[index].kind !== 'unsupported') handlers.command({ c: 'mod', i: index, on: !run.wanted })
+        if (run && event.shiftKey) this.toggleHeat([index])
+        else if (run && rack[index].kind !== 'passive' && rack[index].kind !== 'unsupported') handlers.command({ c: 'mod', i: index, on: !run.wanted })
         event.preventDefault()
       } else if (event.code === 'Space' && event.ctrlKey) {
         handlers.order({ kind: 'stop' })
@@ -412,10 +457,33 @@ export class Hud {
 
     this.root.addEventListener('click', (event) => {
       const target = event.target as HTMLElement
+      const fold = target.closest<HTMLElement>('[data-fold]')?.dataset.fold
+      if (fold !== undefined) {
+        if (!this.folded.delete(fold)) this.folded.add(fold)
+        try {
+          localStorage.setItem(FOLD_KEY, JSON.stringify([...this.folded]))
+        } catch {
+          // Not remembered, then.
+        }
+        this.applyFolds()
+        // A window that was folded has been skipped; bring it up to date at once.
+        this.lastText = 0
+        return
+      }
+      const heatRack = target.closest<HTMLElement>('[data-heat-rack]')?.dataset.heatRack
+      if (heatRack !== undefined) {
+        this.toggleHeat(session.rack.map((m, i) => (m.slot === heatRack ? i : -1)).filter((i) => i >= 0))
+        this.lastText = 0
+        return
+      }
       const mod = target.closest<HTMLElement>('[data-mod]')?.dataset.mod
       if (mod !== undefined) {
+        // The release of a held press has already been dealt with.
+        if (this.held) return void (this.held = false)
         const run = session.own.modules[Number(mod)]
-        if (run) handlers.command({ c: 'mod', i: Number(mod), on: !run.wanted })
+        if (run && event.shiftKey) this.toggleHeat([Number(mod)])
+        else if (run) handlers.command({ c: 'mod', i: Number(mod), on: !run.wanted })
+        this.lastText = 0
         return
       }
       // The drone window: pick tiles, pick a whole type, use an ability, give an order.
@@ -636,6 +704,29 @@ export class Hud {
     }
   }
 
+  private write(el: HTMLElement, html: string) {
+    if (this.written.get(el) === html) return
+    this.written.set(el, html)
+    el.innerHTML = html
+  }
+
+  /** Shows each window open or folded to its title strip, as the pilot left it. */
+  private applyFolds() {
+    this.root.querySelectorAll<HTMLElement>('[data-fold]').forEach((head) => {
+      const closed = this.folded.has(head.dataset.fold!)
+      head.parentElement!.toggleAttribute('data-folded', closed)
+      head.setAttribute('aria-expanded', String(!closed))
+    })
+  }
+
+  /** Overheats these modules, or stops overheating them if every one that can be is already. */
+  private toggleHeat(indices: number[]) {
+    const s = this.session
+    const able = indices.filter((i) => s.rack[i]?.heatDamage > 0 && !s.own.modules[i]?.burnt)
+    if (!able.length) return
+    this.handlers.command({ c: 'heat', is: able, on: !able.every((i) => s.own.modules[i].hot) })
+  }
+
   /** Sends an order to the picked drones and squadrons, or to all of them when none are picked. */
   private orderCraft(act: string) {
     const s = this.session
@@ -716,12 +807,14 @@ export class Hud {
     const s = this.session
     const views = s.own.craft
     if (!views.length || !this.el.craft) return
+    views.forEach((view, n) => view.state === 'dead' && this.picked.delete(n))
+    // A folded window shows only its title strip, so only that is kept up to date.
+    const open = !this.folded.has('craft')
     views.forEach((view, n) => {
       const tile = this.tiles[n]
       const craft = s.craftStats[n]
-      if (!tile || !craft) return
+      if (!open || !tile || !craft) return
       const dead = view.state === 'dead'
-      if (dead) this.picked.delete(n)
       tile.className = `craft-tile${craft.kind === 'fighter' ? ' wide' : ''} ${view.state}${this.picked.has(n) ? ' picked' : ''}`
       tile.disabled = dead
       tile.setAttribute('aria-pressed', String(this.picked.has(n)))
@@ -755,7 +848,7 @@ export class Hud {
       })
     })
     this.groups.forEach((members, g) => {
-      const sub = this.el.craftList.children[g]?.querySelector('[data-group-sub]')
+      const sub = open ? this.el.craftList.children[g]?.querySelector('[data-group-sub]') : null
       if (!sub) return
       const count = (state: CraftView['state'] | 'out') => members.filter((n) => (state === 'out' ? views[n].state !== 'bay' && views[n].state !== 'dead' : views[n].state === state)).length
       const parts = [`${count('out')} out`, `${count('bay')} in bay`]
@@ -794,12 +887,12 @@ export class Hud {
     const own = s.own
     this.brackets.forEach((bracket, i) => {
       const at = s.sights[i]?.dead ? null : project(i)
-      if (at) {
-        bracket.hidden = false
-        bracket.style.transform = `translate(${at.x.toFixed(1)}px, ${at.y.toFixed(1)}px)`
-      } else {
-        bracket.hidden = true
-      }
+      // Written only when it moves: most brackets sit still on most frames.
+      const place = at ? `translate(${at.x.toFixed(1)}px, ${at.y.toFixed(1)}px)` : ''
+      if (place === this.placed[i]) return
+      this.placed[i] = place
+      bracket.hidden = !at
+      if (at) bracket.style.transform = place
     })
 
     // Module cycles sweep every frame; everything else changes five times a second.
@@ -833,9 +926,15 @@ export class Hud {
     const range = new Map<number, number>()
     const onMe = new Set(s.links.filter(([from, to]) => from !== to && (to === s.me || s.entities[to]?.owner === s.me)).map(([from]) => from))
     let listed = 0
+    const overview = !this.folded.has('overview')
     this.rows.forEach((row, i) => {
       const dead = !!s.sights[i]?.dead
       const ship = s.entities[i].kind === 'ship'
+      // Folded, the overview only shows how many things it lists.
+      if (!overview) {
+        if (!dead && !(ship && s.sights[i]?.away)) listed++
+        return
+      }
       // A drone or squadron is only listed while it is in space.
       // A reinforcement is not listed until it arrives.
       row.hidden = ship ? !!s.sights[i]?.away : dead
@@ -852,13 +951,16 @@ export class Hud {
       row.children[4].textContent = dead ? '' : `${int(len(ships[i].vel))} m/s`
     })
     const body = this.el.ovBody
-    const sorted = [...body.children].sort((x, y) => range.get(Number((x as HTMLElement).dataset.ship))! - range.get(Number((y as HTMLElement).dataset.ship))!)
-    if (sorted.some((row, n) => row !== body.children[n])) body.append(...sorted)
+    if (overview) {
+      const sorted = [...body.children].sort((x, y) => range.get(Number((x as HTMLElement).dataset.ship))! - range.get(Number((y as HTMLElement).dataset.ship))!)
+      if (sorted.some((row, n) => row !== body.children[n])) body.append(...sorted)
+    }
     this.el.ovCount.textContent = String(listed)
 
     // Selected item.
     if (chosen) {
       this.el.selName.textContent = chosen.name
+      this.el.selBrief.textContent = `${chosen.name}, ${rangeTo(sel)}`
       this.el.selType.textContent = chosen.type
       this.el.selRange.textContent = rangeTo(sel)
       const lock = lockState(own, sel)
@@ -886,15 +988,17 @@ export class Hud {
       this.cells.forEach((cell, n) => cell.classList.toggle('off', n >= lit))
     }
     this.el.capText.textContent = `${Math.round(cap)}%`
-    this.el.layers.innerHTML =
+    this.write(
+      this.el.layers,
       `<span class="shield">${Math.round(layers[0])}%</span> <span class="armor">${Math.round(layers[1])}%</span> ` +
-      `<span class="hull">${Math.round(layers[2])}%</span> <span class="cap">Cap ${Math.round(cap)}%</span>`
+        `<span class="hull">${Math.round(layers[2])}%</span> <span class="cap">Cap ${Math.round(cap)}%</span>`,
+    )
     const effects = [...own.effects]
     const lockedBy = s.sights.filter((sight, i) => i !== s.me && !sight.dead && sight.lock === LOCK_LOCKED).length
     const lockingBy = s.sights.filter((sight, i) => i !== s.me && !sight.dead && sight.lock === LOCK_LOCKING).length
     if (lockedBy) effects.unshift(lockedBy > 1 ? `Targeted by ${lockedBy}` : 'Targeted')
     else if (lockingBy) effects.unshift('Being targeted')
-    this.el.effects.innerHTML = effects.map((e) => `<span>${esc(e)}</span>`).join('')
+    this.write(this.el.effects, effects.map((e) => `<span>${esc(e)}</span>`).join(''))
 
     // Modules.
     own.modules.forEach((run, i) => {
@@ -902,12 +1006,25 @@ export class Hud {
       const spec = s.rack[i]
       if (!button || !spec) return
       const reloading = run.reloading > 0
+      // Overheated modules glow; a module's heat damage shows as a bar that fills until it burns out.
+      button.classList.toggle('hot', run.hot)
+      button.classList.toggle('burnt', run.burnt)
+      if (run.burnt && !button.disabled) button.disabled = true
+      ;(button.lastElementChild!.firstElementChild as HTMLElement).style.width = `${percent(run.damage, spec.hp).toFixed(0)}%`
       button.classList.toggle('on', run.on)
       button.classList.toggle('stopping', run.on && !run.wanted)
       button.classList.toggle('reloading', reloading)
       button.setAttribute('aria-pressed', String(run.wanted))
       if (!run.on) button.style.setProperty('--p', '0')
       this.counts[i].textContent = reloading ? `${Math.ceil(run.reloading)}s` : spec.charges > 0 ? String(run.charges) : ''
+    })
+    RACKS.forEach((slot, rack) => {
+      const button = this.rackHeat[rack]
+      if (!button) return
+      const able = s.rack.map((m, i) => (m.slot === slot && m.heatDamage > 0 && !own.modules[i]?.burnt ? i : -1)).filter((i) => i >= 0)
+      button.setAttribute('aria-pressed', String(able.length > 0 && able.every((i) => own.modules[i].hot)))
+      ;(button.firstElementChild as HTMLElement).style.height = `${Math.round((own.heat[rack] ?? 0) * 100)}%`
+      button.classList.toggle('danger', (own.heat[rack] ?? 0) > 0.6)
     })
     this.drawCraft()
 

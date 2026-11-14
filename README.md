@@ -25,8 +25,10 @@ the duel.
 | 8 | Drones and fighter squadrons as craft in space, with a drone window to command them | Done |
 | 9 | Fight screen laid out like the game's: status dial, target discs, sorted overview, order buttons, effects drawn between ships | Done |
 | 10 | Scenarios against the computer, alone or with a friend on the same side: challenges with set ships, sandboxes in your own | Done |
-| 11 | Real models for drones and fighters, bombs and micro jump drives, repair drones | Planned |
-| 12 | Overheating, scripts, boosters, implants, command bursts | Planned |
+| 11 | Overheating: rack heat, heat damage, modules that burn out | Done |
+| 12 | Windows that fold away with a tap, and snapshots a third the size | Done |
+| 13 | Real models for drones and fighters, bombs and micro jump drives, repair drones | Planned |
+| 14 | Scripts, boosters, implants, command bursts, nanite repair paste | Planned |
 
 Fits are computed with every skill at level V. Both ships start with every module
 off, as if they had just undocked.
@@ -61,6 +63,10 @@ joins with the code flies on the same side.
   | Battlecruiser escort | Thorax, Caracal | Hurricane, Merlin |
   | Under the guns | Rifter, Incursus | Apocalypse |
   | The Angel and the Snake | Azariel, Vanquisher | Four waves of capitals: 2 dreadnoughts, 3 carriers, 2 supercarriers, then an Avatar and a dreadnought |
+  | Carrier group | Thanatos, Nidhoggur | 3 Apocalypse, 2 Hurricane, 2 Drake |
+  | Siege line | Moros, Naglfar, both with siege modules | 2 Revelation with siege modules, Thanatos |
+  | Titan down | Nyx, Hel | Erebus, Archon |
+  | Clash of titans | Azariel, Vanquisher | Avatar, Erebus |
 
   A scenario can bring its enemies on in waves: each arrives 35 km out, ten
   seconds after everything before it is destroyed, and the fight is not over
@@ -69,7 +75,8 @@ joins with the code flies on the same side.
 - **Sandbox** scenarios set only the opposition. Each player flies whatever fit
   they have loaded: a firing range of hulls that neither move nor shoot at 5,
   10, 20 and 40 km, a frigate wolfpack, a cruiser gang, a drone cloud, three
-  heavy hitters, and a supercarrier.
+  heavy hitters, a pair of sieging dreadnoughts, a lone titan, and a
+  supercarrier.
 
 The scenarios and their fits are in `src/game/scenarios.ts`. A test loads every
 fit and checks it has no fitting problems, and plays each challenge through with
@@ -96,8 +103,19 @@ The screen is laid out the way the game's is, so a pilot knows where to look.
   jammers, painters, dampeners and tracking disruptors, and a shimmer round a
   ship that is repairing armor, boosting shields or patching hull. Both pilots
   see all of them, as they would on grid.
+- **Folding windows.** Tap the title strip of the selected item, the overview or
+  the drone window, or the Log tab, to fold it down to that strip; tap again to
+  bring it back. Folded, the selected item still shows its name and range, the
+  overview how many things it lists, and the drone window how many drones are
+  out. What is folded is remembered for the next fight.
+- **Overheating.** Hold a module for half a second to overheat it (Shift+click
+  with a mouse); it glows orange and takes effect from its next cycle. The
+  button at the end of each rack overheats the whole rack and fills as the rack
+  heats up. A bar across a module is its heat damage. When the bar is full the
+  module has burnt out and is gone for the rest of the fight.
 - **Keys**, with a keyboard: F1 to F8 switch the high slots, Alt+F1 to F8 the mid
-  slots and Ctrl+F1 to F8 the low slots. Ctrl+Space stops the ship.
+  slots and Ctrl+F1 to F8 the low slots; add Shift to overheat. Ctrl+Space stops
+  the ship.
 
 ### What the fight models
 
@@ -122,10 +140,44 @@ The screen is laid out the way the game's is, so a pilot knows where to look.
   titan cannot move for 30 seconds after firing, and the weapon takes minutes to
   fire again whatever becomes of the target. It will not fire at anything smaller
   than a capital. Fuel is not counted, and the lance and area doomsdays do nothing.
+- **Siege modules** work as fitted: a dreadnought's damage goes up tenfold and
+  its repairs double, and it cannot move while one runs its five minutes.
+- **Overheating**: an overheated module gets its overload bonus (more damage or
+  a faster cycle for weapons, more repair for less time, more speed, more range,
+  stronger hardening). Each rack has a heat level that climbs towards 100% as
+  `1 - e^(-t x hull heat rate x the overheated modules' rates)` and cools at 1%
+  a second once nothing in it is overheated. At the end of every overheated
+  cycle, each module in that rack may take the cycling module's heat damage:
+  the chance is the rack's heat, times the share of the ship's slots that are
+  filled and online, times the hull's attenuation for every slot between the
+  two. A module has 40 hit points and burns out when they are gone. Heat damage
+  is taken as with Thermodynamics V. Nanite paste is not modelled, and the
+  computer's ships do not overheat.
 - **Stats follow the fit**: when a module switches on or off, the fitting engine
   recomputes the ship with exactly what is running and what is being done to it.
 - **Drones and fighters** are craft in space, not a number added to the ship's
   damage. See below.
+
+### How the numbers are checked
+
+- Hull, module, charge, drone and skill data is the game data snapshot that ships
+  with the fitting engine, at all skills V. Nothing about a ship is typed in by
+  hand.
+- `tests/audit.test.ts` parks a fit beside a target that neither moves nor
+  shoots and measures what its guns, launchers, drones and fighters take off it.
+  That has to match the engine's damage per second for the same fit to within a
+  few percent, the rest being the luck of the rolls.
+- A module cycle rarely ends exactly on one of the simulation's tenth-of-a-second
+  steps. What it runs over by comes off the next cycle, so a gun that cycles in
+  1.24 seconds fires every 1.24 seconds on average. Before that was carried
+  over, fast guns fired up to 5% slower than they should.
+- Two places where the engine's own figures are not used as they come:
+  - It applies some overload bonuses twice (a turret's damage, a launcher's rate
+    of fire, an armor repairer's amount, an afterburner's speed). Those are
+    computed without the bonus and given it once.
+  - Its damage per second for fighters adds every rocket, torpedo and bomb salvo
+    to the gun cycle as if they fired with it, three to seven times too high.
+    Fights never used that figure; the fit screen now shows the guns alone.
 
 ### Drones and fighters
 
@@ -191,7 +243,7 @@ Simplified or taken from outside the fitting data:
 
 Not modelled yet, or simplified:
 
-- Overheating, scripts, boosters, implants and command bursts.
+- Scripts, boosters, implants and command bursts.
 - Remote repair and other modules that only make sense with a third ship can be
   seen in the rack but not activated.
 - Ranges are measured centre to centre.
@@ -241,7 +293,8 @@ to GitHub Pages (`.github/workflows/deploy.yml`): https://orexx1.github.io/EVE-P
   view shows "relayed" beside the room code when that happened. Either way the
   game runs in the host's browser.
 - `src/game/` is the session. The host's browser runs the simulation ten times a
-  second and sends snapshots; the guest sends orders and commands, which the host
+  second and sends snapshots (rows of rounded numbers, about 1.6 kB for eleven
+  capital ships); the guest sends orders and commands, which the host
   validates. Each pilot is sent their own ship in full and only the other ship's
   shield, armor and hull. `loadout.ts` asks the fitting engine what each ship is
   worth with the modules that are running and the hostile effects on it.

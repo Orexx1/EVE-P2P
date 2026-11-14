@@ -21,6 +21,9 @@
 //   missile       damage x min(1, S/E, (S/E * Ve/Vt)^drf)
 //   fighter       never misses: damage x fighters x missile factor x 0.5 ^ ((max(0, d - optimal) / falloff)^2)
 //   recharge      dC/dt = 10 Cmax/T * (sqrt(C/Cmax) - C/Cmax)      (capacitor and shield)
+//   rack heat     dH/dt = (1 - H) * hull multiplier * sum of the overheated modules' rates; -0.01 H when none is overheated
+//   heat damage   at the end of an overheated cycle, each module in the rack takes the cycling module's
+//                 heat damage with chance H * (online modules / all slots) * attenuation ^ slots away
 import { add, dist, dot, len, norm, scale, sub, type Vec3 } from './vec'
 import type { ShipSpec, ShipState, World } from './world'
 
@@ -98,7 +101,31 @@ export interface ModuleStats {
   note: string
   /** How the module looks from outside while it runs, when its kind alone does not say (a painter and a dampener are both 'ewar'). */
   look: LinkKind | ''
+  /** Where it sits in its rack, counting from 0: heat spreads to its neighbours first. */
+  position: number
+  /** Damage it can take from heat before it burns out. */
+  hp: number
+  /** Damage each of its overheated cycles can do to modules in its rack; 0 if it cannot be overheated. */
+  heatDamage: number
+  /** How fast it heats its rack while overheated, per second. */
+  heatRate: number
 }
+
+/** How a hull handles heat. Racks are high, mid, low, in that order. */
+export interface HeatStats {
+  /** Smaller on bigger hulls: they heat up more slowly. */
+  generation: number
+  /** The share of a rack's heat lost each second while nothing in it is overheated. */
+  dissipation: [number, number, number]
+  /** How much of the chance of damage carries to the next slot along. */
+  attenuation: [number, number, number]
+  /** Every slot the hull has: high, mid, low and rig. */
+  slots: number
+}
+
+export const RACKS = ['HI', 'MED', 'LO'] as const
+/** Thermodynamics V: a quarter off heat damage. */
+const HEAT_DAMAGE_SKILL = 0.75
 
 /**
  * Something one thing in space is visibly doing to another, or to itself:
@@ -150,6 +177,10 @@ export function moduleStats(partial: Partial<ModuleStats> & Pick<ModuleStats, 'k
     projects: false,
     note: '',
     look: '',
+    position: 0,
+    hp: 40,
+    heatDamage: 0,
+    heatRate: 0,
     ...partial,
   }
 }
@@ -302,6 +333,8 @@ export interface ShipStats {
   droneBandwidth: number
   /** Drones that can be in space at once. */
   droneMax: number
+  /** Left out for things that have no racks to heat. */
+  heat?: HeatStats
 }
 
 export interface ModuleRun {
@@ -319,6 +352,13 @@ export interface ModuleRun {
   power: number
   /** The ship this cycle is pointed at, or -1. */
   target: number
+  /** Told to overheat: every cycle it starts from now on is an overheated one. */
+  hot: boolean
+  /** The cycle in progress is an overheated one. */
+  heated: boolean
+  /** Heat damage taken so far. At the module's hit points it burns out. */
+  damage: number
+  burnt: boolean
 }
 
 export const LOCK_NONE = 0
@@ -369,6 +409,8 @@ export interface ShipCombat {
   /** Seconds of sensor jamming left. */
   jammed: number
   modules: ModuleRun[]
+  /** How hot the high, mid and low racks are, 0 to 1. */
+  heat: [number, number, number]
   /** Not on the field yet: a reinforcement that arrives later. It cannot be seen, shot or flown until it does. */
   away: boolean
   /** Seconds the ship is held still, after firing a doomsday. */
@@ -397,6 +439,8 @@ export type Command =
   | { c: 'ability'; ids: number[]; k: number; on: boolean }
   | { c: 'stance'; aggressive: boolean }
   | { c: 'focus'; on: boolean }
+  /** Overheat, or stop overheating, each of these modules from its next cycle. */
+  | { c: 'heat'; is: number[]; on: boolean }
 
 const CRAFT_ORDERS = ['launch', 'engage', 'orbit', 'recall'] as const
 
@@ -420,6 +464,9 @@ export function parseCommand(raw: unknown, count = 2): Command | null {
     const a = CRAFT_ORDERS.find((order) => order === o.a)
     if (!a || (o.t !== undefined && !index(o.t))) return null
     return o.t === undefined ? { c: 'craft', a, ids } : { c: 'craft', a, ids, t: o.t as number }
+  }
+  if (o.c === 'heat' && typeof o.on === 'boolean' && Array.isArray(o.is) && o.is.length > 0 && o.is.length <= 64 && o.is.every((i) => Number.isInteger(i) && i >= 0 && i < 64)) {
+    return { c: 'heat', is: o.is as number[], on: o.on }
   }
   if (o.c === 'stance' && typeof o.aggressive === 'boolean') return { c: 'stance', aggressive: o.aggressive }
   if (o.c === 'focus' && typeof o.on === 'boolean') return { c: 'focus', on: o.on }
@@ -540,7 +587,8 @@ function freshShip(stats: ShipStats): ShipCombat {
     locks: [],
     active: -1,
     jammed: 0,
-    modules: stats.modules.map((m) => ({ on: false, wanted: false, left: 0, total: m.cycle, charges: m.charges, reloading: 0, power: 1, target: -1 })),
+    modules: stats.modules.map((m) => ({ on: false, wanted: false, left: 0, total: m.cycle, charges: m.charges, reloading: 0, power: 1, target: -1, hot: false, heated: false, damage: 0, burnt: false })),
+    heat: [0, 0, 0],
     away: false,
     rooted: 0,
     aggressive: true,
@@ -831,6 +879,22 @@ export class Combat {
       ship.active = command.t
       return null
     }
+    if (command.c === 'heat') {
+      let refusal: string | null = null
+      for (const i of command.is) {
+        const spec = this.stats[index].modules[i]
+        const run = ship.modules[i]
+        if (!spec || !run) continue
+        if (run.burnt) refusal = `${spec.name} has burnt out.`
+        else if (spec.heatDamage <= 0) refusal = `${spec.name} cannot be overheated.`
+        else if (run.hot !== command.on) {
+          run.hot = command.on
+          // The fitting engine works out what overheating does to it.
+          this.dirty[index] = true
+        }
+      }
+      return command.is.length === 1 ? refusal : null
+    }
     if (command.c === 'stance') {
       ship.aggressive = command.aggressive
       return null
@@ -974,6 +1038,7 @@ export class Combat {
       if (ship.rooted > 0) ship.rooted = Math.max(0, ship.rooted - dt)
       ship.cap = recharge(ship.cap, stats.capMax, stats.capRecharge, dt)
       ship.hp[0] = recharge(ship.hp[0], stats.hp[0], stats.shieldRecharge, dt)
+      this.heatRacks(index, dt)
       if (ship.jammed > 0) ship.jammed = Math.max(0, ship.jammed - dt)
 
       for (const lock of [...ship.locks]) {
@@ -1104,6 +1169,7 @@ export class Combat {
     const ship = this.ships[index]
     const spec = this.stats[index].modules[i]
     const run = ship.modules[i]
+    if (run.burnt) return `${spec.name} has burnt out.`
     if (spec.kind === 'passive') return `${spec.name} is always on.`
     if (spec.kind === 'unsupported') return spec.note || `${spec.name} has no effect in a duel.`
     let target = -1
@@ -1133,6 +1199,7 @@ export class Combat {
       run.charges--
       run.power = spec.boost
     }
+    run.heated = run.hot && spec.heatDamage > 0
     const wasOn = run.on
     const before = run.target
     run.on = true
@@ -1162,6 +1229,9 @@ export class Combat {
     if (run.on) {
       run.left -= dt
       if (run.left > 1e-9) return
+      // A cycle rarely ends exactly on a step. What it ran over by comes off the next one,
+      // so a 1.24 second gun fires every 1.24 seconds on average and not every 1.3.
+      const over = Math.min(0, run.left)
       this.onCycleEnd(index, spec, run)
       if (!run.wanted) return this.switchOff(index, i)
       // Roll straight into the next cycle; the stats only change if it cannot.
@@ -1169,7 +1239,9 @@ export class Combat {
       if (refusal) {
         this.note(index, refusal)
         this.switchOff(index, i)
-      } else if (run.reloading > 0) {
+      } else if (run.reloading <= 0) {
+        run.left += over
+      } else {
         // Out of charges: the module rests while it reloads, then resumes.
         run.on = false
         this.flag(index, spec, run.target)
@@ -1277,8 +1349,57 @@ export class Combat {
     this.note(this.owner[from] >= 0 ? this.owner[from] : from, `${name} jams the target.`)
   }
 
+  /** A rack heats while anything in it is running overheated, and cools slowly when nothing is. */
+  private heatRacks(index: number, dt: number) {
+    const ship = this.ships[index]
+    const heat = this.stats[index].heat
+    if (!heat) return
+    const rates = [0, 0, 0]
+    this.stats[index].modules.forEach((m, i) => {
+      const run = ship.modules[i]
+      if (run.on && run.heated) rates[RACKS.indexOf(m.slot as (typeof RACKS)[number])] += m.heatRate
+    })
+    for (let rack = 0; rack < 3; rack++) {
+      if (rates[rack] > 0) ship.heat[rack] += (1 - ship.heat[rack]) * (1 - Math.exp(-heat.generation * rates[rack] * dt))
+      else if (ship.heat[rack] > 0) ship.heat[rack] *= Math.exp(-heat.dissipation[rack] * dt)
+    }
+  }
+
+  /**
+   * An overheated cycle has ended: every module in the same rack may take the
+   * cycling module's heat damage. The hotter the rack the likelier; the further
+   * along the rack the less likely; and empty or burnt-out slots make it less
+   * likely for everything. A module that takes all the damage it can burns out.
+   */
+  private scorch(index: number, source: number) {
+    const ship = this.ships[index]
+    const stats = this.stats[index]
+    const heat = stats.heat
+    const from = stats.modules[source]
+    const rack = RACKS.indexOf(from.slot as (typeof RACKS)[number])
+    if (!heat || rack < 0) return
+    const online = stats.modules.filter((m, i) => RACKS.includes(m.slot as (typeof RACKS)[number]) && !ship.modules[i].burnt).length
+    const share = online / Math.max(heat.slots, 1)
+    stats.modules.forEach((m, i) => {
+      const run = ship.modules[i]
+      if (m.slot !== from.slot || run.burnt) return
+      const chance = ship.heat[rack] * share * heat.attenuation[rack] ** Math.abs(m.position - from.position)
+      if (this.random() >= chance) return
+      run.damage += from.heatDamage * HEAT_DAMAGE_SKILL
+      if (run.damage < m.hp) return
+      run.damage = m.hp
+      run.burnt = true
+      run.hot = false
+      this.switchOff(index, i)
+      // Burnt out, it is as good as unfitted: the ship's numbers change with it.
+      this.dirty[index] = true
+      this.note(index, `${m.name} has burnt out.`)
+    })
+  }
+
   private onCycleEnd(index: number, spec: ModuleStats, run: ModuleRun) {
     const ship = this.ships[index]
+    if (run.heated) this.scorch(index, this.stats[index].modules.indexOf(spec))
     if (spec.kind === 'armorRep') ship.hp[1] = Math.min(this.stats[index].hp[1], ship.hp[1] + spec.amount * run.power)
     if (spec.kind === 'hullRep') ship.hp[2] = Math.min(this.stats[index].hp[2], ship.hp[2] + spec.amount)
   }
@@ -1315,7 +1436,8 @@ export class Combat {
     const me = world.ships[i]
     const home = world.ships[owner]
     for (const ability of run.abilities) {
-      ability.left = Math.max(0, ability.left - dt)
+      // Kept a step below zero, so a weapon that fires again at once can take off what it ran over by.
+      ability.left = Math.max(-dt, ability.left - dt)
       ability.cooldown = Math.max(0, ability.cooldown - dt)
       ability.boost = Math.max(0, ability.boost - dt)
     }
@@ -1376,11 +1498,11 @@ export class Combat {
     me.order = run.chasing ? { kind: 'keep', target: around, range: radius } : { kind: 'orbit', target: around, range: radius }
     nav.maxVelocity = (run.chasing ? craft.speed : craft.orbitSpeed) * pace
 
-    if (run.state === 'engage') this.fireCraft(i, world, d)
+    if (run.state === 'engage') this.fireCraft(i, world, d, dt)
   }
 
   /** Fires whatever an engaged drone or squadron has armed, ready and in range. */
-  private fireCraft(i: number, world: World, distance: number) {
+  private fireCraft(i: number, world: World, distance: number, dt: number) {
     const craft = this.craft[i]!
     const run = this.runs[i]!
     const owner = this.owner[i]
@@ -1389,7 +1511,7 @@ export class Combat {
     craft.abilities.forEach((a, k) => {
       const state = run.abilities[k]
       // Webs and warp disruption simply hold for as long as the craft is engaged.
-      if (!state.on || state.left > 0 || a.kind === 'speed' || a.kind === 'web' || a.kind === 'point') return
+      if (!state.on || state.left > 1e-9 || a.kind === 'speed' || a.kind === 'web' || a.kind === 'point') return
       if (a.craftOnly && !this.craft[to]) return
       if (distance > a.range + 2 * a.falloff) return
       if (a.charges > 0) {
@@ -1400,7 +1522,7 @@ export class Combat {
         }
         state.charges--
       }
-      state.left = a.cycle
+      state.left = a.cycle + (state.left > 1e-9 - dt ? Math.min(0, state.left) : 0)
       this.aggress(i, to)
       if (a.kind === 'neut') {
         const ship = this.ships[to]

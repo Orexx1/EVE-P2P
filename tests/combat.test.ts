@@ -95,7 +95,7 @@ class Duel {
           }
         })
       })
-      this.combat.setStats(index, computeStats(this.loadouts[index], ship.modules.map((m) => m.on), projections))
+      this.combat.setStats(index, computeStats(this.loadouts[index], ship.modules.map((m) => m.on), projections, ship.modules.map((m) => m.hot), ship.modules.map((m) => m.burnt)))
     })
   }
   run(seconds: number, bots: number[] = []) {
@@ -754,5 +754,94 @@ describe('fighters', () => {
     expect(mine.filter((i) => duel.state(i) === 'engage').length).toBeGreaterThan(2)
     expect(duel.combat.events.some((e) => e.t === 'fire' && e.weapon === 'salvo' && e.damage > 0)).toBe(true)
     expect(duel.combat.ships[1].hp[0]).toBeLessThan(duel.combat.stats[1].hp[0] * 0.9)
+  })
+})
+
+describe('overheating', () => {
+  const guns = (duel: Duel) => duel.combat.stats[0].modules.map((m, i) => (m.kind === 'turret' ? i : -1)).filter((i) => i >= 0)
+  const volley = (duel: Duel, i: number) => duel.combat.stats[0].modules[i].damage!.reduce((sum, x) => sum + x, 0)
+
+  it('gives an overheated module its bonus, through the fitting engine', () => {
+    const duel = new Duel('Rifter', 'Rifter')
+    const [gun] = guns(duel)
+    const cool = volley(duel, gun)
+    expect(duel.cmd(0, { c: 'heat', is: [gun], on: true })).toBeNull()
+    // Short-range turrets hit 15% harder overheated.
+    expect(volley(duel, gun) / cool).toBeCloseTo(1.15, 3)
+    const repairer = duel.index(0, 'Armor Repairer')
+    const before = duel.combat.stats[0].modules[repairer]
+    duel.cmd(0, { c: 'mod', i: repairer, on: true })
+    duel.cmd(0, { c: 'heat', is: [repairer], on: true })
+    const after = duel.combat.stats[0].modules[repairer]
+    // An armor repairer cycles 15% faster and repairs 10% more.
+    expect(after.cycle / before.cycle).toBeCloseTo(0.85, 3)
+    expect(after.amount / before.amount).toBeCloseTo(1.1, 3)
+    duel.cmd(0, { c: 'heat', is: [gun, repairer], on: false })
+    expect(volley(duel, gun)).toBeCloseTo(cool, 6)
+    // An afterburner's boost is half as big again: top speed follows from thrust and mass, not a flat 50%.
+    const afterburner = duel.index(0, 'Afterburner')
+    const still = duel.combat.stats[0].maxVelocity
+    duel.cmd(0, { c: 'mod', i: afterburner, on: true })
+    const running = duel.combat.stats[0].maxVelocity
+    duel.cmd(0, { c: 'heat', is: [afterburner], on: true })
+    const overheated = duel.combat.stats[0].maxVelocity
+    expect((overheated - still) / (running - still)).toBeCloseTo(1.5, 2)
+    // A web reaches 30% further, which the engine works out itself.
+    const web = duel.index(0, 'Webifier')
+    const reach = duel.combat.stats[0].modules[web].range
+    duel.cmd(0, { c: 'heat', is: [web], on: true })
+    expect(duel.combat.stats[0].modules[web].range / reach).toBeCloseTo(1.3, 3)
+    expect(duel.cmd(0, { c: 'heat', is: [duel.index(0, 'Damage Control')], on: true })).toMatch(/cannot be overheated/i)
+    expect(parseCommand({ c: 'heat', is: [0, 2], on: true })).toEqual({ c: 'heat', is: [0, 2], on: true })
+    expect(parseCommand({ c: 'heat', is: [], on: true })).toBeNull()
+    expect(parseCommand({ c: 'heat', is: [99], on: true })).toBeNull()
+  })
+
+  it('heats a rack along the curve while modules in it run overheated, and cools it slowly after', () => {
+    // Something that can soak up the fire for as long as the test runs.
+    const duel = new Duel(['Rifter', '[Apocalypse, Empty hull]'], [0, 1])
+    duel.lock(0, 1)
+    const all = guns(duel)
+    duel.cmd(0, { c: 'heat', is: all, on: true })
+    for (const i of all) duel.cmd(0, { c: 'mod', i, on: true })
+    duel.run(20)
+    // Three tech II guns on a frigate: H = 1 - e^(-t x 1.0 x 3 x 0.02).
+    expect(duel.combat.ships[0].heat[0]).toBeCloseTo(1 - Math.exp(-20 * 0.06), 1)
+    expect(duel.combat.ships[0].heat[1]).toBe(0)
+    duel.cmd(0, { c: 'heat', is: all, on: false })
+    duel.run(10)
+    const peak = duel.combat.ships[0].heat[0]
+    // The guns are still firing, but no longer overheated: the rack only cools.
+    expect(peak).toBeLessThan(1 - Math.exp(-20 * 0.06) + 0.1)
+    duel.run(69.3)
+    // With nothing overheated a rack loses 1% of its heat a second: half in 69.3 seconds.
+    expect(duel.combat.ships[0].heat[0] / peak).toBeCloseTo(0.5, 1)
+  })
+
+  it('damages modules in a hot rack until they burn out, and a burnt-out module is gone', () => {
+    const duel = new Duel(['Rifter', '[Apocalypse, Empty hull]'], [0, 1], 3)
+    duel.lock(0, 1)
+    const all = guns(duel)
+    const cool = duel.combat.stats[0].modules[all[0]].kind
+    duel.cmd(0, { c: 'heat', is: all, on: true })
+    for (const i of all) duel.cmd(0, { c: 'mod', i, on: true })
+    duel.run(15)
+    // Nothing has had time to burn out, but the rack is hot and something has been scorched.
+    expect(all.some((i) => duel.combat.ships[0].modules[i].damage > 0)).toBe(true)
+    expect(all.every((i) => duel.combat.ships[0].modules[i].damage < 40)).toBe(true)
+    for (let waited = 0; waited < 600 && !all.some((i) => duel.combat.ships[0].modules[i].burnt); waited += 5) {
+      // Keep them firing: a gun switches itself off when it reloads or runs dry.
+      for (const i of all) if (!duel.combat.ships[0].modules[i].wanted && !duel.combat.ships[0].modules[i].burnt) duel.cmd(0, { c: 'mod', i, on: true })
+      duel.run(5)
+    }
+    const burnt = all.find((i) => duel.combat.ships[0].modules[i].burnt)!
+    expect(burnt).toBeDefined()
+    expect(cool).toBe('turret')
+    expect(duel.combat.ships[0].modules[burnt]).toMatchObject({ on: false, hot: false, damage: 40 })
+    expect(duel.combat.events.some((e) => e.t === 'note' && e.to === 0 && /burnt out/.test(e.text))).toBe(true)
+    // It cannot be switched on or overheated again, and the ship is computed without it.
+    expect(duel.cmd(0, { c: 'mod', i: burnt, on: true })).toMatch(/burnt out/i)
+    expect(duel.cmd(0, { c: 'heat', is: [burnt], on: true })).toMatch(/burnt out/i)
+    expect(duel.combat.stats[0].modules[burnt]).toMatchObject({ kind: 'unsupported' })
   })
 })

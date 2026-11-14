@@ -7,6 +7,7 @@ import type { FittingDataset } from 'eve-fit-engine'
 import { loadDataset } from './data/dataset'
 import { FitError, loadFit } from './fit/loadFit'
 import { SAMPLE_FITS } from './fit/samples'
+import { squadronDamage } from './game/loadout'
 import { renderFit } from './ui/fitView'
 import { createLobby } from './ui/lobby'
 import { esc } from './ui/format'
@@ -109,7 +110,7 @@ function show() {
   try {
     const eft = textarea.value
     const loaded = loadFit(eft, dataset)
-    result.innerHTML = renderFit(loaded)
+    result.innerHTML = renderFit(loaded, squadronDamage(loaded, dataset))
     remember(eft)
     lobby.setFit({ eft, fit: loaded, dataset })
   } catch (err) {

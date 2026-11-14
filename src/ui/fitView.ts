@@ -26,12 +26,15 @@ const colHead = (label: string, short: string) =>
 
 const SLOT_ORDER: SlotType[] = ['HI', 'MED', 'LO', 'RIG', 'SUBSYSTEM']
 
-export function renderFit(loaded: LoadedFit): string {
+/** What a fighter squadron's guns do, by squadron id. Given, these replace the engine's inflated fighter figures. */
+export type SquadronDamage = Map<string, { dps: number; volley: number; cycle: number }>
+
+export function renderFit(loaded: LoadedFit, squadrons: SquadronDamage = new Map()): string {
   return [
     heading(loaded),
     problems(loaded),
     defense(loaded),
-    `<div class="readouts">${offense(loaded)}${capacitor(loaded)}${movement(loaded)}${targeting(loaded)}</div>`,
+    `<div class="readouts">${offense(loaded, squadrons)}${capacitor(loaded)}${movement(loaded)}${targeting(loaded)}</div>`,
     fitted(loaded),
   ].join('')
 }
@@ -121,9 +124,15 @@ function weaponReach(w: WeaponContribution): string {
   return r.tracking > 0 ? `${reach}, ${two(r.tracking)} tracking` : reach
 }
 
-function offense(loaded: LoadedFit): string {
+function offense(loaded: LoadedFit, squadrons: SquadronDamage): string {
   const o = loaded.stats.offense
-  if (o.totalDps <= 0) {
+  // Fighters are counted by their guns alone. Rocket, torpedo and bomb volleys come in limited salvos on top.
+  const own = (w: WeaponContribution) => squadrons.get((w as WeaponContribution & { sourceID?: string }).sourceID ?? '')
+  const fighters = o.breakdown.reduce((sum, w) => sum + (own(w)?.dps ?? 0), 0)
+  const inflated = o.breakdown.reduce((sum, w) => sum + (own(w) ? w.dps : 0), 0)
+  const total = o.totalDps - inflated + fighters
+  const volley = fighters > 0 ? o.breakdown.reduce((sum, w) => sum + (own(w)?.volley ?? w.alpha), 0) : o.alphaStrike
+  if (total <= 0) {
     return `
       <section>
         <h3>Offense</h3>
@@ -132,7 +141,7 @@ function offense(loaded: LoadedFit): string {
       </section>`
   }
   const sustained =
-    o.totalSustainedDps > 0 && Math.abs(o.totalSustainedDps - o.totalDps) / o.totalDps > 0.005
+    fighters <= 0 && o.totalSustainedDps > 0 && Math.abs(o.totalSustainedDps - o.totalDps) / o.totalDps > 0.005
       ? ` (${int(o.totalSustainedDps)} counting reloads)`
       : ''
   const weapons = o.breakdown
@@ -142,17 +151,18 @@ function offense(loaded: LoadedFit): string {
       return `
         <li>
           <span class="item">${count > 1 ? `${count}× ` : ''}${esc(name)}</span>
-          <span class="num">${int(w.dps)} DPS</span>
-          <span class="detail">${esc(weaponReach(w))}, fires every ${two(w.cycleSeconds)} s</span>
+          <span class="num">${int(own(w)?.dps ?? w.dps)} DPS</span>
+          <span class="detail">${esc(weaponReach(w))}, fires every ${two(own(w)?.cycle || w.cycleSeconds)} s</span>
         </li>`
     })
     .join('')
   return `
     <section>
       <h3>Offense</h3>
-      <p class="headline"><span class="big">${int(o.totalDps)}</span> damage per second${sustained}</p>
+      <p class="headline"><span class="big">${int(total)}</span> damage per second${sustained}</p>
       <dl>
-        <div><dt>Volley</dt><dd>${int(o.alphaStrike)}</dd></div>
+        <div><dt>Volley</dt><dd>${int(volley)}</dd></div>
+        ${fighters > 0 ? `<div><dt>From fighters</dt><dd>${int(fighters)} DPS, guns only</dd></div>` : ''}
         ${o.droneDps > 0 ? `<div><dt>From drones</dt><dd>${int(o.droneDps)} DPS</dd></div>` : ''}
       </dl>
       ${weapons ? `<ul class="weapons">${weapons}</ul>` : ''}
