@@ -34,7 +34,11 @@ const browser = await puppeteer.launch({
 const page = await browser.newPage()
 await page.setViewport({ width: 640, height: 400 })
 const hosts = {}
-page.on('console', (m) => note(`console.${m.type()}: ${m.text().slice(0, 600)}`))
+page.on('console', (m) => {
+  // Stack traces from the minified library are noise; keep the first line.
+  const text = m.text()
+  note(`console.${m.type()}: ${(text.startsWith('[smoke]') ? text : text.split('\n')[0]).slice(0, 400)}`)
+})
 page.on('pageerror', (e) => note(`pageerror: ${String(e.stack || e.message).slice(0, 800)}`))
 page.on('requestfailed', (r) => note(`request failed: ${r.url().slice(0, 200)} (${r.failure()?.errorText})`))
 page.on('response', (r) => {
@@ -47,8 +51,9 @@ await page.goto('http://localhost:4173/' + (process.env.DNA ? `?dna=${encodeURIC
 const deadline = Date.now() + 240_000
 let state = 'starting'
 while (Date.now() < deadline) {
-  state = await page.evaluate(() => window.__state)
-  if (state !== 'starting') break
+  // The page reloads itself while it discovers unknown data fields.
+  state = await page.evaluate(() => window.__state).catch(() => 'starting')
+  if (state !== 'starting' && state !== undefined) break
   await new Promise((r) => setTimeout(r, 2000))
 }
 note(`final state: ${state}`)

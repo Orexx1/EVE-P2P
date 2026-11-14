@@ -18,6 +18,35 @@
       const DNA = new URLSearchParams(location.search).get('dna') || 'ab1_t1:amarrbase:amarr'
       const log = (...args) => console.log('[smoke]', ...args)
       window.__state = 'starting'
+
+      // The game's data gains fields over time, and the library must know each
+      // one to read a file at all. Its source cannot currently be rebuilt (a
+      // dependency is unpublished), so missing fields are declared here at run
+      // time. KNOWN lists the ones confirmed so far; anything else the reader
+      // trips over is recorded, guessed to be a string, and the page reloads to
+      // try again, so one run reports every missing field.
+      const KNOWN = [['EveSOFDataHullController', 'visibilityGroup', 'string']]
+      const READERS = {
+        string: (r) => r.ReadStringU16(),
+      }
+      const guessed = JSON.parse(sessionStorage.getItem('guessed') || '[]')
+      for (const [type, prop, kind] of [...KNOWN, ...guessed]) {
+        const cls = tw2.GetClass(type)
+        if (!cls) { log(`no class ${type} to patch`); continue }
+        cls.blackReaders = { ...(cls.blackReaders || {}), [prop]: READERS[kind] }
+      }
+      if (guessed.length) log('guessed fields so far:', JSON.stringify(guessed))
+
+      let unknown = null
+      for (const name of ['group', 'groupCollapsed', 'error', 'warn', 'log']) {
+        const original = console[name].bind(console)
+        console[name] = (...args) => {
+          const hit = /Unknown property "(.+?)" for "(.+?)"/.exec(args.map(String).join(' '))
+          if (hit) unknown = [hit[2], hit[1], 'string']
+          original(...args)
+        }
+      }
+
       ;(async () => {
         try {
           tw2.Register({ paths: { res: `${RELAY}/res/`, r: `${RELAY}/res/` } })
@@ -41,6 +70,12 @@
           log('ship fetched:', ship && ship.constructor && ship.constructor.name)
           window.__state = 'loaded'
         } catch (err) {
+          if (unknown && guessed.length < 25 && !guessed.some((g) => g[0] === unknown[0] && g[1] === unknown[1])) {
+            log(`unknown field ${unknown[0]}.${unknown[1]}: guessing string and reloading`)
+            sessionStorage.setItem('guessed', JSON.stringify([...guessed, unknown]))
+            location.reload()
+            return
+          }
           log('FAILED', (err && (err.stack || err.message || err.name)) || String(err))
           window.__state = 'error'
         }
