@@ -167,7 +167,7 @@ export class Hud {
         </div>
       </div>
 
-      <section class="result" data-el="result" role="alert" hidden>
+      <section class="outcome" data-el="result" role="alert" hidden>
         <h2 data-el="resultTitle"></h2>
         <p data-el="resultText"></p>
         <button type="button" data-act="leave">Leave the fight</button>
@@ -357,7 +357,7 @@ export class Hud {
         `${s.result === 'won' ? `You destroyed ${opponent}'s ${s.players[s.them].fit.shipName}` : s.result === 'lost' ? `${opponent} destroyed your ${s.players[s.me].fit.shipName}` : 'Both ships were destroyed'} ` +
         `after ${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}. Damage dealt ${int(this.dealt)}, taken ${int(this.taken)}.`
       this.el.result.hidden = false
-      this.el.result.className = `result ${s.result}`
+      this.el.result.className = `outcome ${s.result}`
     }
   }
 }

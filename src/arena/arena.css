@@ -580,7 +580,7 @@ html.in-arena {
   color: var(--warn);
 }
 
-.result {
+.outcome {
   position: absolute;
   top: 50%;
   left: 50%;
@@ -597,15 +597,15 @@ html.in-arena {
   border-radius: 6px;
 }
 
-.hud .result h2 {
+.hud .outcome h2 {
   font-size: 1.75rem;
 }
 
-.result.won {
+.outcome.won {
   border-color: #7fe08a;
 }
 
-.result.lost {
+.outcome.lost {
   border-color: #ff5a4d;
 }
 
