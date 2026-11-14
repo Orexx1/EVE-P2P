@@ -38,6 +38,8 @@ export interface LoadedFit {
   stats: DerivedStats
   shipName: string
   shipGroup: string
+  /** The bare hull's signature radius in metres, before any module changes it. */
+  hullSignature: number
   fitName: string
   modules: FitLine[]
   drones: DroneLine[]
@@ -129,6 +131,7 @@ export function loadFit(eft: string, dataset: FittingDataset): LoadedFit {
     stats,
     shipName: ship.name ?? `Type ${ship.id}`,
     shipGroup: dataset.groups.get(ship.groupID)?.name ?? '',
+    hullSignature: ship.attributes.find((a) => a.id === ATTR_SIGNATURE_RADIUS)?.v ?? 100,
     fitName: fit.name,
     modules: fit.modules.map((mod) => ({
       id: mod.id,
@@ -143,6 +146,7 @@ export function loadFit(eft: string, dataset: FittingDataset): LoadedFit {
   }
 }
 
+const ATTR_SIGNATURE_RADIUS = 552
 const ATTR_DRONE_BANDWIDTH_USED = 1272
 const MAX_DRONES_IN_SPACE = 5
 

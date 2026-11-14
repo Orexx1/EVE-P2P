@@ -7,6 +7,7 @@ import { loadDataset } from './data/dataset'
 import { FitError, loadFit } from './fit/loadFit'
 import { SAMPLE_FITS } from './fit/samples'
 import { renderFit } from './ui/fitView'
+import { createLobby } from './ui/lobby'
 import { esc } from './ui/format'
 
 const STORAGE_KEY = 'eve-p2p:last-fit'
@@ -15,7 +16,7 @@ const app = document.querySelector<HTMLDivElement>('#app')!
 app.innerHTML = `
   <header class="site-head">
     <h1>EVE duel sandbox</h1>
-    <p>Paste a fit to see how it flies. Duels against a friend by room code are being built next.</p>
+    <p>Paste a fit, then fly it against a friend with a room code. Movement works today; weapons are being built next.</p>
   </header>
   <main>
     <form class="entry" id="entry">
@@ -31,6 +32,7 @@ app.innerHTML = `
         Or start from a sample:
         ${SAMPLE_FITS.map((s, i) => `<button type="button" class="link" data-sample="${i}">${esc(s.label)}</button>`).join(' ')}
       </p>
+      <div id="lobby"></div>
     </form>
     <div class="result" id="result" aria-live="polite">
       <p class="placeholder">The fit's defense, damage, capacitor and speed will show here.</p>
@@ -53,6 +55,8 @@ const status = app.querySelector<HTMLSpanElement>('#status')!
 const result = app.querySelector<HTMLDivElement>('#result')!
 const dataBuild = app.querySelector<HTMLSpanElement>('#data-build')!
 
+const lobby = createLobby(app.querySelector<HTMLDivElement>('#lobby')!)
+
 let dataset: FittingDataset | null = null
 
 function remember(text: string) {
@@ -74,10 +78,13 @@ function recall(): string {
 function show() {
   if (!dataset) return
   try {
-    const loaded = loadFit(textarea.value, dataset)
+    const eft = textarea.value
+    const loaded = loadFit(eft, dataset)
     result.innerHTML = renderFit(loaded)
-    remember(textarea.value)
+    remember(eft)
+    lobby.setFit({ eft, fit: loaded, dataset })
   } catch (err) {
+    lobby.setFit(null)
     const message =
       err instanceof FitError ? err.message : `Could not read this fit: ${err instanceof Error ? err.message : err}`
     result.innerHTML = `<p class="error" role="alert">${esc(message)}</p>`

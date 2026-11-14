@@ -11,13 +11,20 @@ the duel.
 | Step | What it adds | State |
 | --- | --- | --- |
 | 1 | Paste a fit, see its real stats (defense, damage, capacitor, speed, targeting) | Done |
-| 2 | Room codes, peer-to-peer connection, 2D grid, ship movement | Next |
-| 3 | Core combat: turrets, missiles, reps, capacitor, reloads | Planned |
+| 2 | Room codes, peer-to-peer connection, 3D space view, ship movement, first HUD | Done |
+| 3 | Core combat: locking, turrets, missiles, reps, capacitor, reloads, module rack | Next |
 | 4 | Webs, scrams, neuts, electronic warfare | Planned |
 | 5 | Drones in space, overheating, boosters, implants, command bursts | Planned |
 
 Fits are computed with every skill at level V. Drones are launched automatically up
 to the ship's bandwidth.
+
+Ships are drawn as stand-in hull shapes sized by ship class. Real EVE hull models
+are not included: see "Ship models" below.
+
+On phones the fight view only runs in landscape. In portrait it shows a notice asking
+the player to turn the phone, and the fight does not start until both players are
+in landscape.
 
 ## Run it
 
@@ -41,7 +48,25 @@ to GitHub Pages (`.github/workflows/deploy.yml`): https://orexx1.github.io/EVE-P
 - `src/data/` loads the game data snapshot. `scripts/sync-sde.mjs` copies it out of
   the engine package into `public/sde` before every dev run and build, so updating
   the game data is `npm update eve-fit-engine`.
-- `src/ui/` renders the readout.
+- `src/ui/` renders the readout and the room controls.
+- `src/sim/` is the flight model: deterministic, no browser APIs, covered by tests.
+  Ships accelerate toward a wanted velocity exponentially, with a time constant of
+  mass x inertia modifier / 1e6 seconds, which reproduces in-game align times.
+- `src/net/` opens a room over WebRTC using [PeerJS](https://peerjs.com/). Its free
+  public broker introduces the two browsers; game traffic then flows directly
+  between them.
+- `src/game/` is the session. The host's browser runs the simulation ten times a
+  second and sends snapshots; the guest sends orders. Each side computes both fits
+  locally from the pasted text.
+- `src/arena/` is the fight view: a three.js scene drawn relative to the player's
+  ship, and the HUD.
+
+## Ship models
+
+The game's own hull models are its owner's art and are not served in a form a
+browser can load from another site, so showing them means hosting copies of them.
+Nothing in this repo does that yet. `src/arena/scene.ts` keeps the hull behind one
+function (`makeHull`) so models can replace the stand-ins without touching the rest.
 
 ## Licence
 
