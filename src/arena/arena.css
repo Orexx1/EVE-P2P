@@ -165,6 +165,9 @@ html.in-arena {
   list-style: none;
   display: grid;
   gap: 0.375rem;
+  /* A fight with many kinds of ship has a long list; it must still fit a phone held sideways. */
+  max-height: calc(100vh - 8.5rem);
+  overflow: hidden;
 }
 
 .boot li {
