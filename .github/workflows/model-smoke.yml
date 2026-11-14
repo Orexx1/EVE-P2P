@@ -31,6 +31,17 @@ jobs:
           node scripts/build-res-index.mjs --grep 'quadv5|blit\.|\.sm_'
       - name: Install headless Chrome driver
         run: cd scripts/model-smoke && npm init -y >/dev/null && npm install --no-audit --no-fund puppeteer
+      # A push that changes the index builder also redeploys the site; wait for
+      # the published index to include the shader index before rendering.
+      - name: Wait for the published index
+        run: |
+          for i in $(seq 1 30); do
+            meta=$(curl -fsS "https://orexx1.github.io/EVE-P2P/ri/meta.json?t=$RANDOM" || true)
+            echo "$meta"
+            case "$meta" in *resfileindex_Windows*) exit 0 ;; esac
+            sleep 10
+          done
+          echo "published index never included the Windows index" && exit 1
       - name: Render a hull
         run: node scripts/model-smoke/run.mjs /tmp/ccpwgl2/dist /tmp/smoke-out
         env:

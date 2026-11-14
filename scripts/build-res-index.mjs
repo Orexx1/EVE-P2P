@@ -26,12 +26,17 @@ const build = String(client.build)
 console.log(`client build ${build}`)
 
 const fileList = await get(`${BINARIES}eveonline_${build}.txt`)
-const indexLine = fileList.split('\n').find((l) => l.toLowerCase().startsWith('app:/resfileindex.txt,'))
-if (!indexLine) {
+// The common index plus the Windows one, which carries the platform's compiled
+// shaders. (The "prefetch" list only repeats entries from the common index.)
+const WANTED = ['app:/resfileindex.txt', 'app:/resfileindex_windows.txt']
+const indexLines = fileList.split('\n').filter((l) => WANTED.includes(l.split(',')[0].toLowerCase()))
+if (!indexLines.some((l) => l.toLowerCase().startsWith(WANTED[0] + ','))) {
   console.log(fileList.split('\n').slice(0, 15).join('\n'))
   throw new Error('resfileindex.txt is not named in the build file list')
 }
-const indexText = await get(BINARIES + indexLine.split(',')[1])
+const sources = indexLines.map((l) => l.split(',')[0])
+console.log(`indexes: ${sources.join(', ')}`)
+const indexText = (await Promise.all(indexLines.map((l) => get(BINARIES + l.split(',')[1])))).join('\n')
 const lines = indexText.split('\n').length
 const { shards, entries } = buildShards(indexText, keep)
 console.log(`index: ${lines} lines, ${entries} kept, ${Object.keys(shards).length} shards`)
@@ -69,4 +74,4 @@ console.log('sample:', sample)
 await rm(out, { recursive: true, force: true })
 await mkdir(out, { recursive: true })
 await Promise.all(Object.entries(shards).map(([name, map]) => writeFile(path.join(out, `${name}.json`), JSON.stringify(map))))
-await writeFile(path.join(out, 'meta.json'), JSON.stringify({ build, entries, sample, builtAt: new Date().toISOString() }))
+await writeFile(path.join(out, 'meta.json'), JSON.stringify({ build, entries, sample, sources, builtAt: new Date().toISOString() }))
