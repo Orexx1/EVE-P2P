@@ -49,6 +49,13 @@ if (grepAt > 0) {
   console.log(`${hits.length} paths match ${pattern}; by extension: ${JSON.stringify(byExt)}`)
   const step = Math.max(1, Math.floor(hits.length / 60))
   console.log(hits.filter((_, i) => i % step === 0).slice(0, 70).join('\n'))
+  // The client build's own file list (served from the binaries host) too.
+  const appLines = fileList.split('\n')
+  const appHits = appLines.filter((l) => pattern.test(l.split(',')[0]))
+  const prefixes = {}
+  for (const l of appLines) prefixes[l.split(',')[0].split('/').slice(0, 2).join('/')] = (prefixes[l.split(',')[0].split('/').slice(0, 2).join('/')] ?? 0) + 1
+  console.log(`build file list: ${appLines.length} lines, ${appHits.length} match; top prefixes: ${JSON.stringify(Object.fromEntries(Object.entries(prefixes).sort((a, b) => b[1] - a[1]).slice(0, 12)))}`)
+  console.log(appHits.slice(0, 8).join('\n'))
   process.exit(0)
 }
 

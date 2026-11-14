@@ -28,10 +28,7 @@ jobs:
           git -C /tmp/ccpwgl2 checkout -q FETCH_HEAD
       - name: Inspect the resource index
         run: |
-          node scripts/build-res-index.mjs --grep 'quadv5|blit\.'
-          node scripts/build-res-index.mjs --grep '^graphics/effect[^/]*/managed/space/spaceobject/v5/quad/'
-          node scripts/build-res-index.mjs --grep '^graphics/[^/]+/' | head -3
-          node scripts/build-res-index.mjs --grep '^graphics/effect' | head -2
+          node scripts/build-res-index.mjs --grep 'quadv5|blit\.|\.sm_'
       - name: Install headless Chrome driver
         run: cd scripts/model-smoke && npm init -y >/dev/null && npm install --no-audit --no-fund puppeteer
       - name: Render a hull
