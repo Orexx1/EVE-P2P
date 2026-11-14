@@ -42,6 +42,30 @@ const { shards, entries } = buildShards(indexText, keep)
 console.log(`index: ${lines} lines, ${entries} kept, ${Object.keys(shards).length} shards`)
 if (entries < 10_000) throw new Error('index looks too small to be real')
 
+// The live client now ships only DX12 shaders, which the model loader cannot
+// translate. Content-addressed files stay on the content server, so the DX11
+// shaders are taken from the index of an older client build that still had them.
+const SHADER_BUILD = process.env.SHADER_BUILD || '3470007'
+let dx11Shaders = 0
+try {
+  const oldList = await get(`${BINARIES}eveonline_${SHADER_BUILD}.txt`)
+  const oldIndexes = oldList
+    .split('\n')
+    .filter((l) => /^app:\/resfileindex[^,]*\.txt,/i.test(l) && !/prefetch/i.test(l))
+  const oldText = (await Promise.all(oldIndexes.map((l) => get(BINARIES + l.split(',')[1])))).join('\n')
+  const old = buildShards(oldText, (p) => p.startsWith('graphics/effect.dx11/'))
+  for (const [name, map] of Object.entries(old.shards)) {
+    for (const [p, address] of Object.entries(map)) {
+      if (shards[name]?.[p]) continue
+      ;(shards[name] ??= {})[p] = address
+      dx11Shaders++
+    }
+  }
+  console.log(`build ${SHADER_BUILD}: ${oldIndexes.length} indexes, ${old.entries} dx11 shader files, ${dx11Shaders} added`)
+} catch (err) {
+  console.log(`could not read DX11 shaders from build ${SHADER_BUILD}: ${err.message}`)
+}
+
 const all = Object.values(shards).flatMap((s) => Object.keys(s))
 
 // Diagnostic mode: `--grep <regex>` lists matching paths and writes nothing.
@@ -74,4 +98,4 @@ console.log('sample:', sample)
 await rm(out, { recursive: true, force: true })
 await mkdir(out, { recursive: true })
 await Promise.all(Object.entries(shards).map(([name, map]) => writeFile(path.join(out, `${name}.json`), JSON.stringify(map))))
-await writeFile(path.join(out, 'meta.json'), JSON.stringify({ build, entries, sample, sources, builtAt: new Date().toISOString() }))
+await writeFile(path.join(out, 'meta.json'), JSON.stringify({ build, entries: all.length, sample, sources, dx11Shaders, shaderBuild: SHADER_BUILD, builtAt: new Date().toISOString() }))
