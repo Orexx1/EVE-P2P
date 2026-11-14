@@ -63,10 +63,10 @@ to GitHub Pages (`.github/workflows/deploy.yml`): https://orexx1.github.io/EVE-P
 
 ## Ship models
 
-The game's own hull models are its owner's art and are not served in a form a
-browser can load from another site, so showing them means hosting copies of them.
-Nothing in this repo does that yet. `src/arena/scene.ts` keeps the hull behind one
-function (`makeHull`) so models can replace the stand-ins without touching the rest.
+Real hull models are in progress: see `docs/ship-models.md`. A Cloudflare Worker
+(`worker/`) relays the game's files to the browser, and a CI smoke test already
+renders a real hull through it. The fight view still uses the stand-ins
+(`src/arena/scene.ts`, `makeHull`) until the model view replaces them.
 
 ## Licence
 

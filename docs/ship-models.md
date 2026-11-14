@@ -41,31 +41,55 @@ view currently draws stand-in hulls (`src/arena/scene.ts`, `makeHull`).
 
 ## Where this stands
 
-Done:
+Proven (2026-11-13), all in GitHub Actions because the development sandbox cannot
+reach CCP's servers:
 
-- The relay is deployed at `https://eve-p2p-res.dustin-m117.workers.dev`
-  (recorded in `src/config.ts`). Cloudflare rebuilds it from `worker/` on every
-  push to `main`. Its root path answers; no real resource has been fetched through
-  it yet.
+- **Relay**: `https://eve-p2p-res.dustin-m117.workers.dev` (`src/config.ts`),
+  rebuilt by Cloudflare from `worker/` on every push. `/res/<game path>` resolves
+  through the index; `/r/<aa>/<file>` serves a content address directly. Only the
+  origins in `ALLOWED_ORIGINS` are served.
+- **Index**: `scripts/build-res-index.mjs` runs in the site deploy. It reads the
+  live build from `binaries.eveonline.com/eveclient_TQ.json`, the build's file
+  list, then `resfileindex.txt` and `resfileindex_Windows.txt` (the Windows one
+  holds the compiled shaders), and publishes about 123,000 entries as 4096 shards
+  under `ri/` on the site. `--grep <regex>` lists matching paths for diagnosis.
+- **End-to-end check**: the deploy's `verify-relay` job fetches a real hull file
+  through the relay and checks the CORS header.
+- **First real hull**: the `Model smoke test` workflow renders an Apocalypse
+  (`ab1_t1:amarrbase:amarr`) with ccpwgl2 in headless Chrome and prints a
+  screenshot into its log as base64 (`SCREENSHOT_JPEG_BASE64:`), since artifacts
+  cannot be downloaded from the sandbox. The hull rendered with no shader errors
+  in the last two runs.
+
+Learned the hard way:
+
+- ccpwgl2 cannot be rebuilt from source right now (`@carbonenginejs/runtime` in
+  its lockfile is not on npm), so the prebuilt `dist/` at commit `fa3c4db` is
+  used as is.
+- The game's data gains fields the prebuilt library does not know, and one
+  unknown field fails the whole file. They are declared at run time through
+  `tw2.GetClass(name).blackReaders` (see `scripts/model-smoke/index.html`, which
+  also discovers further unknown fields by guessing strings and reloading).
+  Known so far: `EveSOFDataHullController.visibilityGroup` (string).
+- The live client ships only `graphics/effect.dx12/` shaders; the library asks
+  for `effect.dx11`. The relay falls back to the dx12 file. One run with this
+  setup failed with hundreds of "shader translation(s) failed" and drew no hull;
+  the two runs after it were clean. Cause unknown, so reliability is not
+  established. Older builds' file lists (tried 3470007) are no longer served
+  (HTTP 403), so DX11 shaders cannot be taken from an old build.
+- The default camera sits inside the hull: call `tny.camera.FitToScreen(ship)`.
 
 Next, in order:
 
-1. **Resource index.** In the GitHub Actions build (which can reach CCP's servers;
-   the development sandbox cannot), download the current client's resource index
-   and publish it with the site, split into small shards so the browser can look
-   up one path cheaply. Each index line reads
-   `res:/logical/path,<aa>/<file>,<md5>,<size>,<compressed size>`, and the file
-   lives at `https://resources.eveonline.com/<aa>/<file>`, which the relay serves
-   as `/r/<aa>/<file>`. Finding the current index: the client build list on
-   `binaries.eveonline.com` names `app:/resfileindex.txt` and its address. This
-   chain is from documentation and community tools and has not been run yet.
-2. **Smoke test in CI.** A job that resolves one hull through the index and the
-   relay, renders it with ccpwgl2 in headless Chrome, and uploads a screenshot
-   artifact (readable with `gh run download`).
-3. **Type to model lookup** from the SDE (type -> graphic -> hull:faction:race).
-4. **Swap the space view** to ccpwgl2 behind the same interface as
+1. Run the smoke test several more times and on two or three other hulls to
+   measure how reliable shader translation is.
+2. **Type to model lookup** from the SDE (type -> graphic -> hull:faction:race),
+   generated at build time.
+3. **Swap the space view** to ccpwgl2 behind the same interface as
    `src/arena/scene.ts` (`render`, `project`, `directionAt`, `resize`, `dispose`),
-   keeping the stand-in view as the fallback when a model fails to load.
+   keeping the stand-in view as the fallback when a model fails to load. The
+   library (6 MB) and its two worker files must be served from the site.
+4. Try it on a real phone; decide on a low-quality path if it is too slow.
 
 ## Open risks
 
