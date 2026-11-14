@@ -86,7 +86,7 @@ export class Hud {
       <div class="hud-top">
         <button type="button" data-act="leave">Leave</button>
         ${document.fullscreenEnabled ? '<button type="button" data-act="fullscreen">Full screen</button>' : ''}
-        <span data-el="room">${session.roomCode ? `Room ${esc(session.roomCode)}` : 'Solo flight'}</span>
+        <span data-el="room">${session.roomCode ? `Room ${esc(session.roomCode)}${session.via === 'relay' ? ', relayed' : ''}` : 'Solo flight'}</span>
         <span data-el="clock"></span>
         <span data-el="loading"></span>
       </div>

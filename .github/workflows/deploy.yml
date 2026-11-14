@@ -58,3 +58,6 @@ jobs:
         with:
           node-version: 22
       - run: node scripts/verify-relay.mjs
+      # The relay is deployed by Cloudflare from the same push; this waits for it.
+      - name: Check duel rooms on the relay
+        run: node scripts/verify-room.mjs

@@ -7,18 +7,30 @@
 //                                          path up in the index published with
 //                                          the site (INDEX_URL)
 //
+//   GET /room/<room code>?role=host|guest   (WebSocket)
+//                                      ->  a duel room that passes messages
+//                                          between two players whose browsers
+//                                          cannot connect directly (room.ts)
+//
 // It is deliberately narrow: one upstream host, content addresses only (taken
 // from the request or from the index), read-only, and only for the sites listed
 // in ALLOWED_ORIGINS, so it cannot be used as a general-purpose proxy.
 // Content-addressed files never change and are cached for a year; a game path
 // can point at a new file after a patch, so those answers are cached for a day.
+import { DurableObject } from 'cloudflare:workers'
 import { CONTENT_ADDRESS, normalisePath, shardOf } from '../../shared/resShard.js'
+import { RoomLogic, type RoomContext, type RoomSocket } from './room'
 
 export interface Env {
   ALLOWED_ORIGINS?: string
   /** Base address of the index shards, ending in a slash. */
   INDEX_URL?: string
+  /** Duel rooms, one Durable Object per room code. */
+  ROOMS?: DurableObjectNamespace
 }
+
+// Room codes as the site makes them: six characters, no 0/O or 1/I/L.
+const ROOM_PATH = /^\/room\/([A-HJKMNP-Z2-9]{6})$/
 
 const UPSTREAM = 'https://resources.eveonline.com/'
 const RESOURCE_PATH = /^\/r\/([0-9a-f]{2}\/[0-9a-f]{16}_[0-9a-f]{32})$/
@@ -28,7 +40,7 @@ const HOUR = 3_600
 const DX11_SHADERS = 'graphics/effect.dx11/'
 const DX12_SHADERS = 'graphics/effect.dx12/'
 /** Bumped when behaviour changes, so deploy checks can tell which version is live. */
-const VERSION = 'v2'
+const VERSION = 'v3'
 
 const CONTENT_TYPES: Record<string, string> = {
   png: 'image/png',
@@ -88,6 +100,15 @@ export async function handle(request: Request, env: Env, fetcher: typeof fetch =
   }
   if (url.pathname === '/') return text(200, `EVE duel sandbox resource relay. ${VERSION}`, cors)
 
+  const room = ROOM_PATH.exec(url.pathname)
+  if (room) {
+    const role = url.searchParams.get('role')
+    if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') return text(426, 'Rooms are WebSocket only.', cors)
+    if (role !== 'host' && role !== 'guest') return text(400, 'Say whether you are the host or the guest.', cors)
+    if (!env.ROOMS) return text(503, 'Rooms are not available.', cors)
+    return env.ROOMS.get(env.ROOMS.idFromName(room[1])).fetch(request)
+  }
+
   let address: string
   let maxAge = YEAR
   let extension = ''
@@ -146,6 +167,37 @@ export async function handle(request: Request, env: Env, fetcher: typeof fetch =
   cors.set('Cache-Control', maxAge === YEAR ? `public, max-age=${YEAR}, immutable` : `public, max-age=${maxAge}`)
   cors.set('X-Content-Type-Options', 'nosniff')
   return new Response(upstream.body, { status: upstream.status, headers: cors })
+}
+
+/** The Durable Object behind one room code. The behaviour lives in room.ts. */
+export class Room extends DurableObject<Env> {
+  private logic: RoomLogic
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env)
+    this.logic = new RoomLogic(ctx as unknown as RoomContext)
+    // Keep-alives are answered without waking the room.
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'))
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    const role = new URL(request.url).searchParams.get('role') === 'host' ? 'host' : 'guest'
+    const pair = new WebSocketPair()
+    this.logic.join(pair[1] as unknown as RoomSocket, role)
+    return new Response(null, { status: 101, webSocket: pair[0] } as ResponseInit)
+  }
+
+  webSocketMessage(socket: WebSocket, message: string | ArrayBuffer) {
+    this.logic.message(socket as unknown as RoomSocket, message)
+  }
+
+  webSocketClose(socket: WebSocket) {
+    this.logic.closed(socket as unknown as RoomSocket)
+  }
+
+  webSocketError(socket: WebSocket) {
+    this.logic.closed(socket as unknown as RoomSocket)
+  }
 }
 
 export default {

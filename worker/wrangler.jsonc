@@ -1,5 +1,6 @@
 // Cloudflare Worker that relays EVE resource files to the site with the
-// cross-origin headers browsers require. Deployed by Cloudflare on every push
+// cross-origin headers browsers require, and hosts duel rooms for players
+// whose browsers cannot connect to each other directly. Deployed by Cloudflare on every push
 // (Workers Builds, root directory: worker). The name must match the Worker's
 // name in the Cloudflare dashboard.
 {
@@ -9,6 +10,11 @@
   // Served from the free workers.dev address; no per-branch preview addresses.
   "workers_dev": true,
   "preview_urls": false,
+  // Duel rooms for players who cannot connect directly: one small object per room code.
+  "durable_objects": {
+    "bindings": [{ "name": "ROOMS", "class_name": "Room" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }],
   "vars": {
     // Sites allowed to load files through this relay, comma separated.
     "ALLOWED_ORIGINS": "https://orexx1.github.io,http://localhost:5173,http://localhost:4173",

@@ -248,6 +248,8 @@ export abstract class Session {
   result: Result | null = null
   /** Things that happened, waiting for the interface to show them. */
   events: CombatEvent[] = []
+  /** How the two players are connected; null when flying solo. */
+  via: Channel['via'] | null = null
   protected over = false
 
   constructor(
@@ -300,6 +302,7 @@ export class HostSession extends Session {
     this.combat = new Combat([this.statsFor(0, [], []), this.statsFor(1, [], [])])
     this.syncViews()
     if (channel) {
+      this.via = channel.via
       channel.onMessage = (raw) => this.receive(raw)
       channel.onClose = () => {
         this.stop()
@@ -495,6 +498,7 @@ export class GuestSession extends Session {
     this.own = ownView(combat, 1)
     this.foe = foeView(combat, 0)
     for (const side of [0, 1] as const) applyNav(players[side].spec, combat.stats[side])
+    this.via = channel.via
     channel.onMessage = (raw) => this.receive(raw)
     channel.onClose = () => this.end('Your opponent disconnected.')
   }

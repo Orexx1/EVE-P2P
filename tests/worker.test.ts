@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { buildShards, normalisePath, shardOf } from '../shared/resShard.js'
 import { handle } from '../worker/src/index'
+import { CLOSE_NO_ROOM, CLOSE_PEER_LEFT, CLOSE_TAKEN, JOINED, MAX_MESSAGE_LENGTH, RoomLogic, SEATED, type RoomContext, type RoomSocket } from '../worker/src/room'
 
 const env = {
   ALLOWED_ORIGINS: 'https://orexx1.github.io, http://localhost:5173',
@@ -138,5 +139,111 @@ describe('resource index', () => {
     const down = vi.fn(async () => new Response('', { status: 500 }))
     expect((await handle(req(`/res/${GR2}`), env, down as unknown as typeof fetch)).status).toBe(503)
     expect((await handle(req(`/res/${GR2}`), { ALLOWED_ORIGINS: SITE }, down as unknown as typeof fetch)).status).toBe(503)
+  })
+})
+
+// A stand-in for the platform's socket bookkeeping.
+function fakeRoom() {
+  const tags = new Map<object, string[]>()
+  const ctx: RoomContext = {
+    acceptWebSocket: (socket, t = []) => void tags.set(socket, t),
+    getWebSockets: (tag) => [...tags.keys()].filter((s) => !tag || tags.get(s)!.includes(tag)) as RoomSocket[],
+  }
+  const socket = () => {
+    const s = {
+      sent: [] as string[],
+      closed: null as number | null,
+      send: (m: string) => void s.sent.push(m),
+      close: (code?: number) => {
+        s.closed = code ?? 1000
+        tags.delete(s)
+      },
+      accept: () => {},
+      note: undefined as unknown,
+      serializeAttachment: (value: unknown) => void (s.note = value),
+      deserializeAttachment: () => s.note,
+    }
+    return s
+  }
+  return { logic: new RoomLogic(ctx), socket }
+}
+
+describe('duel rooms', () => {
+  it('seats a host, then a guest, and tells both when the room is full', () => {
+    const { logic, socket } = fakeRoom()
+    const host = socket()
+    const guest = socket()
+    expect(logic.join(host, 'host')).toBe(0)
+    expect(host.sent).toEqual([SEATED])
+    expect(logic.join(guest, 'guest')).toBe(0)
+    expect(guest.sent).toEqual([SEATED, JOINED])
+    expect(host.sent).toEqual([SEATED, JOINED])
+  })
+
+  it('passes game messages to the other player only', () => {
+    const { logic, socket } = fakeRoom()
+    const host = socket()
+    const guest = socket()
+    logic.join(host, 'host')
+    logic.join(guest, 'guest')
+    logic.message(host, '{"t":"snap"}')
+    logic.message(guest, '{"t":"order"}')
+    expect(guest.sent.at(-1)).toBe('{"t":"snap"}')
+    expect(host.sent.at(-1)).toBe('{"t":"order"}')
+    // Nothing a player sends can pose as a signal from the room, or be oversized.
+    logic.message(guest, JOINED)
+    logic.message(guest, 'x'.repeat(MAX_MESSAGE_LENGTH + 1))
+    logic.message(guest, new ArrayBuffer(8))
+    expect(host.sent.at(-1)).toBe('{"t":"order"}')
+  })
+
+  it('turns away a guest with no host, a second host and a third player, without disturbing the room', () => {
+    const { logic, socket } = fakeRoom()
+    const early = socket()
+    expect(logic.join(early, 'guest')).toBe(CLOSE_NO_ROOM)
+    expect(early.closed).toBe(CLOSE_NO_ROOM)
+    const host = socket()
+    const guest = socket()
+    logic.join(host, 'host')
+    const impostor = socket()
+    expect(logic.join(impostor, 'host')).toBe(CLOSE_TAKEN)
+    logic.join(guest, 'guest')
+    const third = socket()
+    expect(logic.join(third, 'guest')).toBe(CLOSE_TAKEN)
+    expect(third.closed).toBe(CLOSE_TAKEN)
+    logic.closed(third)
+    expect(host.closed).toBeNull()
+    expect(guest.closed).toBeNull()
+  })
+
+  it('closes the other player\'s connection when one leaves, and frees the code', () => {
+    const { logic, socket } = fakeRoom()
+    const host = socket()
+    const guest = socket()
+    logic.join(host, 'host')
+    logic.join(guest, 'guest')
+    guest.close()
+    logic.closed(guest)
+    expect(host.closed).toBe(CLOSE_PEER_LEFT)
+    expect(logic.join(socket(), 'host')).toBe(0)
+  })
+
+  it('only opens rooms for allowed sites, valid codes and WebSocket requests', async () => {
+    const fetched: string[] = []
+    const rooms = {
+      idFromName: (name: string) => name,
+      get: (id: unknown) => ({ fetch: async () => (fetched.push(String(id)), new Response('room')) }),
+    }
+    const roomEnv = { ...env, ROOMS: rooms }
+    const ws = { headers: { Upgrade: 'websocket' } }
+    expect((await handle(req('/room/K7Q2MX?role=host', ws), roomEnv)).status).toBe(200)
+    expect(fetched).toEqual(['K7Q2MX'])
+    expect((await handle(req('/room/K7Q2MX?role=host'), roomEnv)).status).toBe(426)
+    expect((await handle(req('/room/K7Q2MX?role=admin', ws), roomEnv)).status).toBe(400)
+    expect((await handle(req('/room/K7Q2MX?role=host', ws, 'https://evil.example'), roomEnv)).status).toBe(403)
+    expect((await handle(req('/room/k7q2mx?role=host', ws), roomEnv)).status).toBe(404)
+    expect((await handle(req('/room/K7Q2M0?role=host', ws), roomEnv)).status).toBe(404)
+    expect((await handle(req('/room/K7Q2MX?role=host', ws), env)).status).toBe(503)
+    expect(fetched).toEqual(['K7Q2MX'])
   })
 })

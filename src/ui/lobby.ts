@@ -135,7 +135,7 @@ export function createLobby(host: HTMLElement): Lobby {
       const channel = await opened.guest
       if (id !== attempt) return channel.close()
       hosted = null
-      status.textContent = 'Opponent connected. Exchanging fits…'
+      status.textContent = `Opponent connected${channel.via === 'relay' ? ' through the relay' : ''}. Exchanging fits…`
       const theirs = await handshake(channel, mine, dataset)
       await launch(new HostSession([mine, { ...theirs, spec: specFor(theirs.fit) }], channel, opened.code, dataset))
     } catch (err) {
@@ -156,9 +156,11 @@ export function createLobby(host: HTMLElement): Lobby {
     setBusy(true)
     status.textContent = `Joining room ${code}…`
     try {
-      const channel = await joinRoom(code)
+      const channel = await joinRoom(code, (text) => {
+        if (id === attempt) status.textContent = text
+      })
       if (id !== attempt) return channel.close()
-      status.textContent = 'Connected. Exchanging fits…'
+      status.textContent = `Connected${channel.via === 'relay' ? ' through the relay' : ''}. Exchanging fits…`
       const theirs = await handshake(channel, mine, dataset)
       await launch(new GuestSession([{ ...theirs, spec: specFor(theirs.fit) }, mine], channel, code, dataset))
     } catch (err) {

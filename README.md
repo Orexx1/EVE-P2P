@@ -84,9 +84,14 @@ to GitHub Pages (`.github/workflows/deploy.yml`): https://orexx1.github.io/EVE-P
   exponentially, with a time constant of mass x inertia modifier / 1e6 seconds,
   which reproduces in-game align times. `combat.ts` is locking, module cycles,
   capacitor, damage and destruction.
-- `src/net/` opens a room over WebRTC using [PeerJS](https://peerjs.com/). Its free
-  public broker introduces the two browsers; game traffic then flows directly
-  between them.
+- `src/net/` opens a room. The direct route is WebRTC through
+  [PeerJS](https://peerjs.com/): its free public broker introduces the two
+  browsers and game traffic then flows straight between them. Many home and
+  mobile networks do not allow that, so the host also opens the room on the relay
+  (a WebSocket room on the Cloudflare Worker, `worker/src/room.ts`) and a guest
+  who cannot get through directly joins there after eight seconds. The fight
+  view shows "relayed" beside the room code when that happened. Either way the
+  game runs in the host's browser.
 - `src/game/` is the session. The host's browser runs the simulation ten times a
   second and sends snapshots; the guest sends orders and commands, which the host
   validates. Each pilot is sent their own ship in full and only the other ship's
