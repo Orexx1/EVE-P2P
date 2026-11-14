@@ -39,6 +39,34 @@ view currently draws stand-in hulls (`src/arena/scene.ts`, `makeHull`).
    rendering is checked by a GitHub Actions job that loads a hull in a headless
    browser and saves a screenshot.
 
+## Where this stands
+
+Done:
+
+- The relay is deployed at `https://eve-p2p-res.dustin-m117.workers.dev`
+  (recorded in `src/config.ts`). Cloudflare rebuilds it from `worker/` on every
+  push to `main`. Its root path answers; no real resource has been fetched through
+  it yet.
+
+Next, in order:
+
+1. **Resource index.** In the GitHub Actions build (which can reach CCP's servers;
+   the development sandbox cannot), download the current client's resource index
+   and publish it with the site, split into small shards so the browser can look
+   up one path cheaply. Each index line reads
+   `res:/logical/path,<aa>/<file>,<md5>,<size>,<compressed size>`, and the file
+   lives at `https://resources.eveonline.com/<aa>/<file>`, which the relay serves
+   as `/r/<aa>/<file>`. Finding the current index: the client build list on
+   `binaries.eveonline.com` names `app:/resfileindex.txt` and its address. This
+   chain is from documentation and community tools and has not been run yet.
+2. **Smoke test in CI.** A job that resolves one hull through the index and the
+   relay, renders it with ccpwgl2 in headless Chrome, and uploads a screenshot
+   artifact (readable with `gh run download`).
+3. **Type to model lookup** from the SDE (type -> graphic -> hull:faction:race).
+4. **Swap the space view** to ccpwgl2 behind the same interface as
+   `src/arena/scene.ts` (`render`, `project`, `directionAt`, `resize`, `dispose`),
+   keeping the stand-in view as the fallback when a model fails to load.
+
 ## Open risks
 
 - Phone performance: 6 MB engine plus runtime shader translation (described as

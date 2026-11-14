@@ -6,6 +6,9 @@
   "name": "eve-p2p-res",
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
+  // Served from the free workers.dev address; no per-branch preview addresses.
+  "workers_dev": true,
+  "preview_urls": false,
   "vars": {
     // Sites allowed to load files through this relay, comma separated.
     "ALLOWED_ORIGINS": "https://orexx1.github.io,http://localhost:5173,http://localhost:4173"
