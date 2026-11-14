@@ -18,6 +18,10 @@ app.innerHTML = `
   <header class="site-head">
     <h1>EVE duel sandbox</h1>
     <p>Paste a fit, then fight it against a friend with a room code: locking, weapons, tank, capacitor and electronic warfare, computed from the real fit.</p>
+    <p class="poc" role="note">
+      <strong>Proof of concept.</strong> An unofficial, non-commercial fan project. It is not made by, affiliated with,
+      sponsored by or endorsed by Fenris Creations (formerly CCP Games). <a href="#about">More</a>
+    </p>
   </header>
   <main>
     <form class="entry" id="entry">
@@ -40,13 +44,32 @@ app.innerHTML = `
       <p class="placeholder">The fit's defense, damage, capacitor and speed will show here.</p>
     </div>
   </main>
-  <footer class="site-foot">
+  <footer class="site-foot" id="about">
+    <h2>About this project</h2>
     <p>
-      Free and open source under the GPL-3.0. Fitting math by
+      This is a proof of concept: an experiment to see whether a two-player EVE fitting duel can run entirely in the
+      browser. It is unfinished, it will have bugs, and its numbers can differ from the game. It may change or go
+      offline at any time, and it is provided as is, with no warranty of any kind.
+    </p>
+    <p>
+      It is an unofficial fan project, made by a player in their own time. It is not made by, affiliated with,
+      sponsored by, approved by or endorsed by Fenris Creations (formerly CCP Games, CCP hf.) or any of its partners,
+      and nothing here should be taken as speaking for them. It is free, carries no advertising, takes no payments or
+      donations, and asks for no EVE account or login.
+    </p>
+    <p>
+      EVE, EVE Online and all related names, logos, ships, images and game data are the intellectual property of
+      Fenris Creations (formerly CCP Games, CCP hf.), and all rights in them are reserved by their owner. They appear
+      here only to describe and illustrate the game for its players. No claim of ownership is made over any of it.
+      Game data is used under the EVE Online Developer License.
+    </p>
+    <p>
+      If you represent the rights holder and want something changed or removed, open an issue at
+      <a href="https://github.com/Orexx1/EVE-P2P/issues">github.com/Orexx1/EVE-P2P</a> and it will be dealt with promptly.
+    </p>
+    <p>
+      The site's own code is free and open source under the GPL-3.0. Fitting math by
       <a href="https://github.com/capsuleers-app/capsuleers.fitting-engine">eve-fit-engine</a>, built on pyfa.
-      "EVE", "EVE Online", "CCP" and all related logos and images are trademarks or registered trademarks
-      of CCP hf. &copy; CCP hf. All rights reserved. Game data is used under the EVE Online Developer License.
-      This site is not affiliated with or endorsed by CCP.
       <span id="data-build"></span>
     </p>
   </footer>`

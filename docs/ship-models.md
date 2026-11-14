@@ -1,5 +1,9 @@
 # Real ship models: findings and plan
 
+"CCP" below means the maker of EVE Online, which has operated as Fenris Creations
+since May 2026. This project is an unofficial proof of concept and is not
+affiliated with or endorsed by them: see the README's disclaimer.
+
 Status: real EVE hull models are in the fight view (2026-11-13). The fight starts
 on stand-in hulls (`src/arena/scene.ts`) and switches to the real ones
 (`src/arena/modelView.ts`) when both have loaded.

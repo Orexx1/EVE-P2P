@@ -1,5 +1,10 @@
 # EVE duel sandbox
 
+> **Proof of concept.** This is an unofficial, non-commercial fan project and an
+> experiment, not a finished product. It is **not made by, affiliated with,
+> sponsored by, approved by or endorsed by Fenris Creations** (formerly CCP Games,
+> CCP hf.), the makers of EVE Online. See [Disclaimer](#disclaimer).
+
 A free, browser-based sandbox where two EVE Online pilots paste their fits, share a
 room code, and fight each other peer to peer. No accounts, no game server.
 
@@ -131,14 +136,38 @@ device cannot draw them at a usable frame rate, the stand-ins stay. Players can
 also turn real models off on the fit page. Details, findings and the licence
 position are in `docs/ship-models.md`.
 
-Module icons come from CCP's image server.
+Module icons come from the EVE image server.
+
+## Disclaimer
+
+**This is a proof of concept.** It exists to find out whether a two-player EVE
+fitting duel can run entirely in the browser. It is unfinished, it has bugs, and
+its numbers can differ from the game. It may change or go offline at any time. It
+is provided as is, with no warranty of any kind and no promise of support.
+
+**It is unofficial.** It is a fan project made by a player in their own time. It
+is not made by, affiliated with, sponsored by, approved by or endorsed by Fenris
+Creations (formerly CCP Games, CCP hf.) or any of its partners, and nothing in
+this repository or on the site speaks for them.
+
+**It is non-commercial.** It is free, carries no advertising, takes no payments
+or donations, and asks for no EVE account or login.
+
+**EVE belongs to its owner.** EVE, EVE Online and all related names, logos,
+ships, images and game data are the intellectual property of Fenris Creations
+(formerly CCP Games, CCP hf.), and all rights in them are reserved by their owner.
+They appear here only to describe and illustrate the game for its players. No
+claim of ownership is made over any of it, and the licence below does not cover it.
+
+**Rights holders:** if you represent the owner and want something changed or
+removed, please [open an issue](https://github.com/Orexx1/EVE-P2P/issues) and it
+will be dealt with promptly.
 
 ## Licence
 
-The code is GPL-3.0-or-later (see `LICENSE`), because the fitting engine it builds
-on is.
+The code written for this project is GPL-3.0-or-later (see `LICENSE`), because the
+fitting engine it builds on is. That licence covers this project's own code only.
 
-EVE Online and all related material are the property of their owner and are used
-under the EVE Online Developer License. The game data in `public/sde` is covered by
-that licence, not the GPL. This project is not affiliated with or endorsed by the
-owner of EVE Online.
+The game data in `public/sde` is used under the EVE Online Developer License and is
+not covered by the GPL. Nothing belonging to Fenris Creations is licensed, or
+relicensed, by this repository.

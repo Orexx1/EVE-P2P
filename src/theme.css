@@ -74,6 +74,37 @@ body {
   letter-spacing: 0.01em;
 }
 
+/* The standing notice under the title: amber, because it is a caution. */
+.site-head .poc {
+  margin-top: 0.625rem;
+  padding: 0.4375rem 0.75rem;
+  max-width: 62ch;
+  border-left: 3px solid var(--caution);
+  background: rgb(242 184 75 / 0.08);
+  color: var(--text);
+  font-size: 0.875rem;
+}
+
+.site-head .poc strong {
+  color: var(--caution);
+}
+
+.site-head .poc a,
+.site-foot a {
+  color: var(--friend);
+}
+
+.site-foot h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 0.5rem;
+}
+
+.site-foot p + p {
+  margin-top: 0.625rem;
+}
+
 /* Buttons: green means go. Every button answers a press at once. */
 .actions button[type='submit'],
 .duel-row button,
