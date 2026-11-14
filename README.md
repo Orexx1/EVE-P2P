@@ -30,7 +30,8 @@ npm test         # checks fit numbers against the reference engine
 npm run build    # static site in dist/, ready for any web host
 ```
 
-`dist/` is plain static files. Upload it to any host that serves HTTPS.
+`dist/` is plain static files. Every push to `main` tests, builds and publishes it
+to GitHub Pages (`.github/workflows/deploy.yml`): https://orexx1.github.io/EVE-P2P/
 
 ## How it works
 
