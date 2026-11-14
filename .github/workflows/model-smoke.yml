@@ -21,6 +21,9 @@ on:
       fit:
         description: Sample fit for the fight check (0 Rifter, 1 Merlin, 2 Caracal)
         required: false
+      gfx:
+        description: Graphics options for the fight check, as JSON
+        required: false
 
 jobs:
   smoke:
@@ -90,6 +93,7 @@ jobs:
         run: node scripts/site-smoke/run.mjs "$PWD/dist" /tmp/fight-out
         env:
           FIT: ${{ inputs.fit }}
+          GFX: ${{ inputs.gfx }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:

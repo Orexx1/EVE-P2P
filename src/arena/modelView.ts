@@ -11,6 +11,7 @@
 // kept between fights.
 import { RESOURCE_RELAY } from '../config'
 import { dnaFor } from '../data/models'
+import { getGraphics, markEngineStarted, onGraphicsChange, pixelRatio } from '../ui/graphics'
 import { FIELD_OF_VIEW, type CameraRig, type FightView, type ShipView } from './rig'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -143,6 +144,7 @@ function perspective(out: Float32Array | number[], aspect: number, near: number,
 }
 
 async function boot(): Promise<Stage> {
+  const graphics = getGraphics()
   bootStep(5)
   await timed('library', loadScript(new URL(LIBRARY, document.baseURI).href))
   bootStep(20)
@@ -189,17 +191,25 @@ async function boot(): Promise<Stage> {
       camera,
       device: {
         effectProfile: tw2.const.DeviceEffectProfile.DX11,
-        shaderQuality: tw2.const.DeviceShaderQuality.MEDIUM,
+        // These three are fixed for the life of the engine: see ui/graphics.ts.
+        shaderQuality: graphics.shaders,
+        textureQuality: graphics.textures,
+        antialiasing: graphics.antialias,
       },
       // Nothing is drawn between fights.
       render: (dt: number) => made.active?.frame(dt),
     }),
   )
-  try {
-    tw2.device.SetPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5))
-  } catch {
-    // Older builds of the library size the canvas on their own.
+  markEngineStarted(graphics)
+  const applyResolution = () => {
+    try {
+      tw2.device.SetPixelRatio(pixelRatio())
+    } catch {
+      // Older builds of the library size the canvas on their own.
+    }
   }
+  applyResolution()
+  onGraphicsChange(applyResolution)
   bootStep(80)
   made.scene = await timed('backdrop', tny.FetchScene(BACKDROP))
   bootStep(100)
@@ -212,6 +222,7 @@ export class ModelView implements FightView {
   private latest: [ShipView, ShipView] | null = null
   private slowFor = 0
   private shown = 0
+  private owed = 0
 
   private constructor(
     private stage: Stage,
@@ -257,6 +268,12 @@ export class ModelView implements FightView {
   frame(dt: number) {
     const ships = this.latest
     if (!ships) return
+    // A frame-rate limit draws only when enough time has built up.
+    const graphics = getGraphics()
+    this.owed += dt
+    if (graphics.fps && this.owed < 1 / graphics.fps - 0.004) return
+    dt = this.owed
+    this.owed = 0
     ships.forEach((ship, i) => {
       const hull = this.hulls[i]
       const at = this.rig.offsets[i]
@@ -271,7 +288,7 @@ export class ModelView implements FightView {
     // to the stand-in view. The first seconds are skipped: shaders are still
     // being translated then. Automated browsers draw in software and are exempt.
     this.shown += dt
-    if (this.shown > 6 && !navigator.webdriver) {
+    if (this.shown > 6 && graphics.autoSimplify && !navigator.webdriver) {
       this.slowFor = dt > 1 / 12 ? this.slowFor + dt : 0
       if (this.slowFor > 5) {
         this.slowFor = 0

@@ -108,6 +108,28 @@ html.in-arena {
   color: var(--muted);
 }
 
+/* Graphics options, dropped down from the top bar. */
+.gfx-panel {
+  position: absolute;
+  top: calc(max(0.5rem, env(safe-area-inset-top)) + 2.5rem);
+  left: max(0.5rem, env(safe-area-inset-left));
+  z-index: 2;
+  width: min(24rem, calc(100% - 15rem));
+  max-height: calc(100% - 4rem);
+  overflow-y: auto;
+  background: rgb(20 29 39 / 0.96);
+}
+
+.gfx-panel .gfx {
+  margin-top: 0;
+}
+
+.arena .gfx select {
+  min-height: 1.875rem;
+  padding: 0.1875rem 0.375rem;
+  background: rgb(27 38 50 / 0.9);
+}
+
 .hud-notice {
   position: absolute;
   top: 22%;

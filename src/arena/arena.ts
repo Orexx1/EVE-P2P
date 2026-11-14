@@ -5,31 +5,13 @@ import { add, scale } from '../sim/vec'
 import { timeConstant, wantedVelocity, type ShipState } from '../sim/world'
 import { dnaFor } from '../data/models'
 import { FireEffects } from './fx'
+import { getGraphics, setGraphics } from '../ui/graphics'
 import { Hud } from './hud'
 import { CameraRig, type FightView, type ShipView } from './rig'
 import { SpaceView } from './scene'
 
-const MODELS_KEY = 'eve-p2p:real-models'
 /** How long a fight waits for real models before starting on stand-ins. */
 const MODEL_WAIT_MS = 45_000
-
-/** Real ship models are on unless this device has turned them off (by choice or because they ran too slowly). */
-export function realModelsEnabled(): boolean {
-  try {
-    return localStorage.getItem(MODELS_KEY) !== 'off'
-  } catch {
-    return true
-  }
-}
-
-export function setRealModels(on: boolean) {
-  try {
-    if (on) localStorage.removeItem(MODELS_KEY)
-    else localStorage.setItem(MODELS_KEY, 'off')
-  } catch {
-    // No storage: the choice lasts for this fight only.
-  }
-}
 
 /** A small window for automated checks to see how the fight view is doing. */
 const report = (window as unknown as { __arena: Record<string, unknown> }).__arena ??= {}
@@ -72,7 +54,7 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
   // With real models on, the fight waits for them behind a loading notice
   // instead of starting on stand-ins and swapping part-way through.
   const dnas = session.players.map((p) => dnaFor(p.fit.fit.shipTypeID))
-  const wantModels = realModelsEnabled() && !!dnas[0] && !!dnas[1]
+  const wantModels = getGraphics().models && !!dnas[0] && !!dnas[1]
   let settled = !wantModels
   canvas.hidden = !settled
 
@@ -83,6 +65,7 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
     window.removeEventListener('resize', layout)
     portrait.removeEventListener('change', layout)
     clearTimeout(modelWait)
+    hud.dispose()
     session.leave()
     view.dispose()
     standin?.dispose()
@@ -200,7 +183,7 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
         if (closed) return
         const backToStandins = (remember: boolean) => {
           if (closed || view !== models) return
-          if (remember) setRealModels(false)
+          if (remember) setGraphics({ models: false })
           models.dispose()
           canvas.hidden = false
           view = standin = new SpaceView(canvas, lengths, rig)

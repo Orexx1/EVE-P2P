@@ -3,8 +3,7 @@ import type { FittingDataset } from 'eve-fit-engine'
 import type { LoadedFit } from '../fit/loadFit'
 import { cleanPilot, GuestSession, handshake, HostSession, specFor, type Player, type Session } from '../game/session'
 import { hostRoom, joinRoom, normaliseCode, type HostedRoom } from '../net/room'
-
-const MODELS_KEY = 'eve-p2p:real-models'
+import { getGraphics, mountGraphicsPanel } from './graphics'
 
 const PILOT_KEY = 'eve-p2p:pilot'
 
@@ -34,10 +33,10 @@ export function createLobby(host: HTMLElement): Lobby {
           <input type="checkbox" id="spar" checked />
           Solo practice target fights back
         </label>
-        <label class="check">
-          <input type="checkbox" id="models" />
-          Real ship models (heavier to load; turn off if the fight stutters)
-        </label>
+        <details class="gfx-fold">
+          <summary>Graphics options</summary>
+          <div id="gfx"></div>
+        </details>
       </div>
       <div class="room" hidden>
         <p>Give this code to your opponent:</p>
@@ -61,32 +60,16 @@ export function createLobby(host: HTMLElement): Lobby {
   let hosted: HostedRoom | null = null
   let attempt = 0
 
-  const modelsInput = host.querySelector<HTMLInputElement>('#models')!
-  const readModels = () => {
-    try {
-      modelsInput.checked = localStorage.getItem(MODELS_KEY) !== 'off'
-    } catch {
-      modelsInput.checked = true
-    }
-  }
   try {
     pilotInput.value = localStorage.getItem(PILOT_KEY) ?? ''
   } catch {
     // No storage: the name just is not remembered.
   }
-  readModels()
-  modelsInput.addEventListener('change', () => {
-    try {
-      if (modelsInput.checked) localStorage.removeItem(MODELS_KEY)
-      else localStorage.setItem(MODELS_KEY, 'off')
-    } catch {
-      // No storage: models stay on.
-    }
-  })
+  mountGraphicsPanel(host.querySelector<HTMLElement>('#gfx')!)
 
   /** Starts loading real hulls now, so they are ready by the time the fight opens. */
   const warm = (...fits: LoadedFit[]) => {
-    if (!modelsInput.checked) return
+    if (!getGraphics().models) return
     void import('../arena/modelView').then((m) => m.warmShips(fits.map((f) => f.fit.shipTypeID))).catch(() => {})
   }
 
@@ -115,11 +98,7 @@ export function createLobby(host: HTMLElement): Lobby {
     status.textContent = 'Opening the fight…'
     const { launchArena } = await import('../arena/arena')
     reset()
-    launchArena(session, (reason) => {
-      // The fight turns models off by itself on a device that cannot keep up.
-      readModels()
-      reset(reason ?? '')
-    })
+    launchArena(session, (reason) => reset(reason ?? ''))
   }
 
   const fail = (err: unknown) => reset(err instanceof Error ? err.message : String(err))

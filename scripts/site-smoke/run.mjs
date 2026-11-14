@@ -3,7 +3,7 @@
 // a sample fit in headless Chrome, waits for the real hulls to take over from
 // the stand-ins, and saves a screenshot.
 //
-//   node run.mjs <dist dir> <output dir>      FIT=<sample index, default 0>
+//   node run.mjs <dist dir> <output dir>      FIT=<sample index, default 0>  GFX=<graphics options as JSON>
 import { createReadStream, existsSync, statSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import http from 'node:http'
@@ -32,6 +32,11 @@ const browser = await puppeteer.launch({
 })
 const page = await browser.newPage()
 await page.setViewport({ width: 844, height: 390 })
+// GFX='{"shaders":"depth"}' flies the fight with those graphics options.
+if (process.env.GFX) {
+  await page.evaluateOnNewDocument((options) => localStorage.setItem('eve-p2p:graphics', options), process.env.GFX)
+  note(`graphics options: ${process.env.GFX}`)
+}
 const hosts = {}
 const seen = new Map()
 page.on('console', (m) => {

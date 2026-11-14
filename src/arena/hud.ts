@@ -7,6 +7,7 @@ import { LOCK_LOCKED, LOCK_LOCKING, LOCK_NONE, QUALITY, type Command, type Comba
 import { dist, len } from '../sim/vec'
 import { describeOrder, formatRange, type Order, type ShipState } from '../sim/world'
 import { esc, int } from '../ui/format'
+import { mountGraphicsPanel } from '../ui/graphics'
 
 const RANGES = [500, 1_000, 2_500, 5_000, 7_500, 10_000, 15_000, 20_000, 30_000]
 const LOG_LINES = 5
@@ -71,6 +72,12 @@ export class Hud {
   private dealt = 0
   private shownResult: Result | null = null
   private loading: number | null = null
+  private stopGraphics: (() => void) | null = null
+
+  /** Call when the fight view closes. */
+  dispose() {
+    this.stopGraphics?.()
+  }
 
   constructor(private session: Session, handlers: HudHandlers) {
     const me = session.players[session.me]
@@ -87,10 +94,13 @@ export class Hud {
       <div class="hud-top">
         <button type="button" data-act="leave">Leave</button>
         ${document.fullscreenEnabled ? '<button type="button" data-act="fullscreen">Full screen</button>' : ''}
+        <button type="button" data-act="graphics" aria-expanded="false" data-el="gfxButton">Graphics</button>
         <span data-el="room">${session.roomCode ? `Room ${esc(session.roomCode)}${session.via === 'relay' ? ', relayed' : ''}` : 'Solo flight'}</span>
         <span data-el="clock"></span>
         <span data-el="loading"></span>
       </div>
+
+      <section class="gfx-panel panel" data-el="gfxPanel" aria-label="Graphics options" hidden></section>
 
       <section class="target" data-el="target" aria-label="Locked target" hidden>
         <h2>${esc(them.pilot)} <span class="sub" data-el="targetRange"></span></h2>
@@ -199,6 +209,12 @@ export class Hud {
       if (act === 'drones') handlers.command({ c: 'drones', on: session.own.drones.state === 'bay' })
       if (act === 'leave') handlers.leave()
       if (act === 'fullscreen') void this.fullscreen()
+      if (act === 'graphics') {
+        const panel = this.el.gfxPanel
+        panel.hidden = !panel.hidden
+        this.el.gfxButton.setAttribute('aria-expanded', String(!panel.hidden))
+        if (!panel.hidden && !this.stopGraphics) this.stopGraphics = mountGraphicsPanel(panel)
+      }
     })
     // Changing a distance while already orbiting or holding range applies it straight away.
     this.root.addEventListener('change', (event) => {

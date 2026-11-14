@@ -2,6 +2,7 @@
 // It draws at once, on any device, and is what the fight falls back to when
 // the real ship models cannot be loaded (see modelView.ts).
 import * as THREE from 'three'
+import { getGraphics, onGraphicsChange, pixelRatio } from '../ui/graphics'
 import type { CameraRig, FightView, ShipView } from './rig'
 
 const DUST_COUNT = 500
@@ -63,6 +64,8 @@ export class SpaceView implements FightView {
   private dust: THREE.Points
   private dustBase: Float32Array
   private dustBox: number
+  private stopWatching: () => void
+  private lastDrawn = 0
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -70,8 +73,12 @@ export class SpaceView implements FightView {
     private rig: CameraRig,
   ) {
     const me = rig.me
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true })
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: getGraphics().antialias, logarithmicDepthBuffer: true })
+    this.renderer.setPixelRatio(pixelRatio())
+    this.stopWatching = onGraphicsChange(() => {
+      this.renderer.setPixelRatio(pixelRatio())
+      this.renderer.setSize(canvas.clientWidth, canvas.clientHeight, false)
+    })
     this.renderer.setClearColor(0x05080c)
 
     this.scene.add(makeStars())
@@ -103,6 +110,10 @@ export class SpaceView implements FightView {
   }
 
   render(ships: [ShipView, ShipView]) {
+    const fps = getGraphics().fps
+    const now = performance.now()
+    if (fps && now - this.lastDrawn < 1000 / fps - 4) return
+    this.lastDrawn = now
     const origin = this.rig.origin
     ships.forEach((ship, i) => {
       const hull = this.hulls[i]
@@ -127,6 +138,7 @@ export class SpaceView implements FightView {
   }
 
   dispose() {
+    this.stopWatching()
     this.scene.traverse((object) => {
       const mesh = object as THREE.Mesh
       mesh.geometry?.dispose()
