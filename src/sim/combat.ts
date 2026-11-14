@@ -44,8 +44,15 @@ export type ModuleKind =
   | 'neut'
   | 'nos'
   | 'ecm'
+  /** A titan's superweapon: one enormous delayed hit on a capital ship, then a long wait. */
+  | 'doomsday'
   | 'passive'
   | 'unsupported'
+
+/** Hulls with a signature at least this wide count as capital ships. A doomsday can be fired at nothing smaller. */
+export const CAPITAL_SIGNATURE = 2_000
+/** Firing a doomsday holds the ship still for this long. */
+export const DOOMSDAY_IMMOBILE = 30
 
 export interface ModuleStats {
   kind: ModuleKind
@@ -362,6 +369,10 @@ export interface ShipCombat {
   /** Seconds of sensor jamming left. */
   jammed: number
   modules: ModuleRun[]
+  /** Not on the field yet: a reinforcement that arrives later. It cannot be seen, shot or flown until it does. */
+  away: boolean
+  /** Seconds the ship is held still, after firing a doomsday. */
+  rooted: number
   /** Drones go for whoever attacks this ship without being told to. */
   aggressive: boolean
   /** Drones that pick their own target all pick the same one. */
@@ -434,7 +445,7 @@ export type CombatEvent =
       t: 'fire'
       from: number
       to: number
-      weapon: 'turret' | 'missile' | 'drone' | 'fighter' | 'salvo' | 'bomb'
+      weapon: 'turret' | 'missile' | 'drone' | 'fighter' | 'salvo' | 'bomb' | 'doomsday'
       name: string
       quality: number
       damage: number
@@ -445,6 +456,8 @@ export type CombatEvent =
   /** Something only one pilot is told. */
   | { t: 'note'; to: number; text: string }
   | { t: 'dead'; who: number }
+  /** A reinforcement came onto the field. */
+  | { t: 'arrive'; who: number }
 
 interface Missile {
   from: number
@@ -528,6 +541,8 @@ function freshShip(stats: ShipStats): ShipCombat {
     active: -1,
     jammed: 0,
     modules: stats.modules.map((m) => ({ on: false, wanted: false, left: 0, total: m.cycle, charges: m.charges, reloading: 0, power: 1, target: -1 })),
+    away: false,
+    rooted: 0,
     aggressive: true,
     focus: true,
     dead: false,
@@ -617,6 +632,8 @@ export class Combat {
     stats: ShipStats[],
     private random: () => number = Math.random,
     teams: number[] = stats.map((_, i) => (i === 0 ? 0 : 1)),
+    /** `away[i]` is true for a ship that is not on the field at the start. */
+    away: boolean[] = [],
   ) {
     this.shipCount = stats.length
     this.stats = [...stats]
@@ -636,6 +653,22 @@ export class Combat {
     this.nav = this.craft.map((craft) => (craft ? { maxVelocity: craft.speed, mass: craft.mass, agility: craft.agility, radius: craft.radius } : null))
     this.dirty = this.stats.map(() => false)
     this.aggro = this.stats.map(() => new Map())
+    away.forEach((gone, index) => {
+      if (this.ships[index] && index < this.shipCount) this.ships[index].away = gone
+    })
+  }
+
+  /** Brings a reinforcement onto the field at `pos`, at rest. */
+  arrive(index: number, world: World, pos: Vec3) {
+    const ship = this.ships[index]
+    if (!ship || !ship.away) return
+    ship.away = false
+    world.ships[index].pos = [...pos]
+    world.ships[index].vel = [0, 0, 0]
+    world.ships[index].order = { kind: 'stop' }
+    // Its drones and squadrons come with it, still docked.
+    for (const c of this.craftOf(index)) world.ships[c].pos = [...pos]
+    this.events.push({ t: 'arrive', who: index })
   }
 
   /** The drones and squadrons a ship carries, as indices into `ships`. */
@@ -648,7 +681,7 @@ export class Combat {
   /** In space and able to be locked, shot at or flown to. */
   present(index: number): boolean {
     const ship = this.ships[index]
-    return !!ship && !ship.dead && this.runs[index]?.state !== 'bay'
+    return !!ship && !ship.dead && !ship.away && this.runs[index]?.state !== 'bay'
   }
 
   /** Signature radius right now: a squadron on a speed burst is a bigger or smaller target. */
@@ -676,6 +709,7 @@ export class Combat {
    * a ship's own numbers already include those.
    */
   slow(index: number, world: World): number {
+    if (this.ships[index].rooted > 0) return 0
     const strengths: number[] = []
     const at = world.ships[index].pos
     if (this.craft[index]) {
@@ -773,6 +807,7 @@ export class Combat {
     if (this.winner !== null) return 'The fight is over.'
     // In a fight with several ships a side, a pilot can lose their ship while their side fights on.
     if (ship.dead) return 'Your ship has been destroyed.'
+    if (ship.away) return null
     const range = (to: number) => dist(world.ships[index].pos, world.ships[to].pos)
 
     if (command.c === 'lock') {
@@ -934,8 +969,9 @@ export class Combat {
     const range = (a: number, b: number) => len(sub(world.ships[a].pos, world.ships[b].pos))
 
     this.ships.forEach((ship, index) => {
-      if (ship.dead) return
+      if (ship.dead || ship.away) return
       const stats = this.stats[index]
+      if (ship.rooted > 0) ship.rooted = Math.max(0, ship.rooted - dt)
       ship.cap = recharge(ship.cap, stats.capMax, stats.capRecharge, dt)
       ship.hp[0] = recharge(ship.hp[0], stats.hp[0], stats.shieldRecharge, dt)
       if (ship.jammed > 0) ship.jammed = Math.max(0, ship.jammed - dt)
@@ -962,6 +998,7 @@ export class Combat {
     })
 
     this.ships.forEach((ship, index) => {
+      if (ship.away) return
       for (let i = 0; i < ship.modules.length; i++) this.runModule(index, i, world, dt)
       if (this.runs[index]) this.runCraft(index, world, dt)
     })
@@ -1048,7 +1085,8 @@ export class Combat {
     if (at < 0) return
     ship.locks.splice(at, 1)
     this.stats[index].modules.forEach((m, i) => {
-      if (m.needsTarget && ship.modules[i].target === target) {
+      // A doomsday that has fired goes on cooling down whatever becomes of its target.
+      if (m.needsTarget && ship.modules[i].target === target && m.kind !== 'doomsday') {
         this.switchOff(index, i)
         ship.modules[i].target = -1
       }
@@ -1076,6 +1114,9 @@ export class Combat {
       const distance = len(sub(world.ships[index].pos, world.ships[target].pos))
       if (spec.kind !== 'turret' && spec.kind !== 'missile' && spec.falloff <= 0 && distance > spec.range) {
         return `${spec.name}: the target is out of range.`
+      }
+      if (spec.kind === 'doomsday' && (this.craft[target] || this.stats[target].signature < CAPITAL_SIGNATURE)) {
+        return `${spec.name} can only be fired at a capital ship.`
       }
     }
     if (spec.mwd && this.under(index, 'scram')) return 'You are warp scrambled: the microwarpdrive will not start.'
@@ -1208,6 +1249,14 @@ export class Combat {
       }
       case 'ecm':
         if (spec.jam) this.jam(index, to, spec.name, spec.jam, falloffFactor(distance, spec.range, spec.falloff), spec.cycle)
+        break
+      case 'doomsday':
+        // The beam takes a few seconds to build, then lands whole: nothing about the target reduces it but its resists.
+        this.missiles.push({ from: index, to, at: this.time + spec.flightTime, name: spec.name, damage: spec.damage!, explosionRadius: 0, explosionVelocity: 0, drf: 1, reaches: true })
+        this.events.push({ t: 'fire', from: index, to, weapon: 'doomsday', name: spec.name, quality: -1, damage: 0, flight: spec.flightTime })
+        // The ship cannot move while it fires, and the weapon does not fire again unless told to.
+        ship.rooted = DOOMSDAY_IMMOBILE
+        run.wanted = false
         break
     }
   }

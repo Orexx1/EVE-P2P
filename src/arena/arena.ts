@@ -174,7 +174,8 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
     for (const event of events) if (event.t === 'dead') diedAt[event.who] = now
     const views: ShipView[] = ships.map((ship, i) => {
       // A destroyed ship stays for a moment so it vanishes inside its fireball.
-      const alive = !diedAt[i] || now - diedAt[i] < 250
+      // A reinforcement that has not arrived is not drawn at all.
+      const alive = !session.sights[i]?.away && (!diedAt[i] || now - diedAt[i] < 250)
       return { ...ship, thrust: alive ? thrust(ship, session.players[i].spec.maxVelocity) : 0, alive }
     })
     // The camera sits on the pilot's own ship unless they are looking at something else that is still there.

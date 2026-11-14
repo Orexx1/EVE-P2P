@@ -13,7 +13,7 @@ import type { CombatEvent, Link, LinkKind } from '../sim/combat'
 type Point = { x: number; y: number } | null
 
 interface Effect {
-  kind: 'tracer' | 'missile' | 'ring' | 'blast'
+  kind: 'tracer' | 'missile' | 'ring' | 'blast' | 'lance'
   /** The ship it starts at and the ship it ends at (the same ship for rings and blasts). */
   from: number
   to: number
@@ -116,6 +116,9 @@ export class FireEffects {
           continue
         } else if (event.weapon === 'missile') {
           push('missile', event.from, event.to, event.from, Math.max(event.flight, 0.2), 0)
+        } else if (event.weapon === 'doomsday') {
+          // A beam that builds for as long as the weapon takes to land.
+          push('lance', event.from, event.to, event.from, Math.max(event.flight, 0.5), 0)
         } else if (event.weapon === 'salvo') {
           // A squadron's rockets or torpedoes: quick to arrive, and they always land.
           push('missile', event.from, event.to, event.from, 0.35, 0)
@@ -127,6 +130,10 @@ export class FireEffects {
         }
       } else if (event.t === 'impact') {
         push('ring', event.to, event.to, event.from, 0.4, 18)
+      } else if (event.t === 'arrive') {
+        // A ship coming onto the field: two rings opening where it appears.
+        push('ring', event.who, event.who, event.who, 1.2, 70)
+        push('ring', event.who, event.who, event.who, 0.7, 40)
       } else if (event.t === 'dead') {
         // A drone goes with a pop; a ship with a fireball.
         if (this.small[event.who]) push('blast', event.who, event.who, event.who, 0.6, 0.25)
@@ -406,6 +413,30 @@ export class FireEffects {
         ctx.moveTo(source.x, source.y)
         ctx.lineTo(endX, endY)
         ctx.stroke()
+      } else if (effect.kind === 'lance' && source) {
+        // Thin at first, then a column of light; brightest just before it lands.
+        const build = t * t
+        ctx.globalCompositeOperation = 'lighter'
+        ctx.strokeStyle = color
+        ctx.globalAlpha = 0.25 + 0.5 * build
+        ctx.lineWidth = 2 + 12 * build
+        ctx.beginPath()
+        ctx.moveTo(source.x, source.y)
+        ctx.lineTo(target.x, target.y)
+        ctx.stroke()
+        ctx.strokeStyle = '#fff'
+        ctx.globalAlpha = 0.5 + 0.5 * build
+        ctx.lineWidth = 0.8 + 3.5 * build
+        ctx.beginPath()
+        ctx.moveTo(source.x, source.y)
+        ctx.lineTo(target.x, target.y)
+        ctx.stroke()
+        ctx.globalAlpha = 0.3 + 0.6 * build
+        ctx.fillStyle = '#fff'
+        ctx.beginPath()
+        ctx.arc(target.x, target.y, 4 + 22 * build, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.globalCompositeOperation = 'source-over'
       } else if (effect.kind === 'missile' && source) {
         const x = source.x + (target.x - source.x) * t
         const y = source.y + (target.y - source.y) * t

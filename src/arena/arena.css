@@ -114,6 +114,23 @@ html.in-arena {
   z-index: 1;
 }
 
+/* A long scenario name gives way before the clock does, and the strip stops short of the locked targets. */
+.hud-top {
+  max-width: calc((100% - 13.5rem) / 2 + 3.5rem);
+  white-space: nowrap;
+}
+
+.hud-top > * {
+  flex: none;
+}
+
+.hud-top [data-el='room'] {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .hud-top {
   font-size: 0.75rem;
   position: absolute;

@@ -35,7 +35,7 @@ import { createWorld, parseOrder, step, type Order, type ShipSpec, type World } 
 import { runBot } from './bots'
 import { buildLoadout, computeStats, projects, type Loadout, type Projection } from './loadout'
 
-const PROTOCOL = 5
+const PROTOCOL = 6
 const STEP_SECONDS = 0.1
 const MAX_EFT_LENGTH = 20_000
 const MAX_PILOT_LENGTH = 32
@@ -54,7 +54,14 @@ export interface Player {
   behaviour: Behaviour
   /** Where the ship starts, when the scenario says; otherwise it lines up with its team. */
   at?: Vec3
+  /** 0 for a ship on the field from the start; 1, 2, 3... for reinforcements that arrive once every earlier wave on their side is destroyed. */
+  wave: number
 }
+
+/** How long after a wave is destroyed the next one arrives, in seconds. */
+const WAVE_DELAY = 10
+/** How far from the ships they have come for a wave arrives, in metres. */
+const WAVE_RANGE = 35_000
 
 export type Behaviour = 'fight' | 'passive' | 'still'
 
@@ -77,6 +84,7 @@ export interface Extra {
   eft: string
   behaviour?: Behaviour
   at?: Vec3
+  wave?: number
 }
 
 export function specFor(fit: LoadedFit): ShipSpec {
@@ -94,7 +102,7 @@ export function cleanPilot(name: string): string {
   return name.replace(/\s+/g, ' ').trim().slice(0, MAX_PILOT_LENGTH) || 'Pilot'
 }
 
-export const playerFor = (pilot: string, fit: LoadedFit, team: number, bot: boolean, behaviour: Behaviour = 'fight', at?: Vec3): Player => ({
+export const playerFor = (pilot: string, fit: LoadedFit, team: number, bot: boolean, behaviour: Behaviour = 'fight', at?: Vec3, wave = 0): Player => ({
   pilot,
   fit,
   spec: specFor(fit),
@@ -102,11 +110,12 @@ export const playerFor = (pilot: string, fit: LoadedFit, team: number, bot: bool
   bot,
   behaviour,
   at,
+  wave,
 })
 
 /** Turns the host's list of extra ships into players. Throws a FitError if one cannot be read. */
 export function loadExtras(extras: Extra[], dataset: FittingDataset): Player[] {
-  return extras.map((extra) => playerFor(cleanPilot(extra.pilot), loadFit(extra.eft, dataset), extra.team === 0 ? 0 : 1, true, extra.behaviour, extra.at))
+  return extras.map((extra) => playerFor(cleanPilot(extra.pilot), loadFit(extra.eft, dataset), extra.team === 0 ? 0 : 1, true, extra.behaviour, extra.at, extra.wave))
 }
 
 function readExtras(raw: unknown): Extra[] | null {
@@ -115,7 +124,8 @@ function readExtras(raw: unknown): Extra[] | null {
   const extras: Extra[] = []
   for (const item of raw as Array<Record<string, unknown> | null>) {
     if (typeof item?.eft !== 'string' || item.eft.length > MAX_EFT_LENGTH || typeof item.pilot !== 'string') return null
-    extras.push({ team: item.team === 0 ? 0 : 1, pilot: item.pilot, eft: item.eft })
+    const wave = Number.isInteger(item.wave) && (item.wave as number) > 0 && (item.wave as number) < 20 ? (item.wave as number) : 0
+    extras.push({ team: item.team === 0 ? 0 : 1, pilot: item.pilot, eft: item.eft, wave })
   }
   return extras
 }
@@ -207,7 +217,7 @@ export function handshake(
       v: PROTOCOL,
       pilot: mine.pilot,
       eft: mine.eft,
-      extras: (mine.extras ?? []).map(({ team, pilot, eft }) => ({ team, pilot, eft })),
+      extras: (mine.extras ?? []).map(({ team, pilot, eft, wave }) => ({ team, pilot, eft, wave })),
       setup: mine.setup,
     })
   })
@@ -266,7 +276,10 @@ export interface Sight {
   hp: [number, number, number]
   /** That ship's lock on you. */
   lock: LockState
+  /** Not there to be seen: destroyed, docked, or not yet arrived. */
   dead: boolean
+  /** A reinforcement that has not arrived yet. */
+  away: boolean
 }
 
 export type Result = 'won' | 'lost' | 'draw'
@@ -299,6 +312,7 @@ function ownView(combat: Combat, index: number): OwnView {
   const stats = combat.stats[index]
   const effects = new Set<string>()
   if (ship.jammed > 0) effects.add('Jammed')
+  if (ship.rooted > 0) effects.add('Immobile')
   combat.ships.forEach((other, o) => {
     if (o === index || other.dead) return
     combat.stats[o].modules.forEach((m, i) => {
@@ -331,6 +345,7 @@ function sights(combat: Combat, viewer: number): Sight[] {
     hp: fractions(ship.hp, combat.stats[index].hp),
     lock: lockState(ship, viewer),
     dead: !combat.present(index),
+    away: ship.away,
   }))
 }
 
@@ -414,7 +429,7 @@ function readOwnView(raw: unknown, slots: number, count: number, craft: CraftSta
 
 function readSights(raw: unknown, count: number): Sight[] | null {
   if (!Array.isArray(raw) || raw.length !== count) return null
-  return raw.map((item: Record<string, unknown> | null) => ({ hp: triple(item?.hp), lock: lockOf(item?.lock), dead: item?.dead === true }))
+  return raw.map((item: Record<string, unknown> | null) => ({ hp: triple(item?.hp), lock: lockOf(item?.lock), dead: item?.dead === true, away: item?.away === true }))
 }
 
 function readEvent(raw: unknown, count: number): CombatEvent | null {
@@ -425,7 +440,7 @@ function readEvent(raw: unknown, count: number): CombatEvent | null {
   const from = ship(o.from)
   switch (o.t) {
     case 'fire': {
-      const weapon = (['missile', 'drone', 'fighter', 'salvo', 'bomb'] as const).find((w) => w === o.weapon) ?? 'turret'
+      const weapon = (['missile', 'drone', 'fighter', 'salvo', 'bomb', 'doomsday'] as const).find((w) => w === o.weapon) ?? 'turret'
       return from < 0 ? null : { t: 'fire', from, to: ship(o.to), weapon, name: text(o.name), quality: num(o.quality), damage: num(o.damage), flight: num(o.flight) }
     }
     case 'impact':
@@ -434,6 +449,8 @@ function readEvent(raw: unknown, count: number): CombatEvent | null {
       return { t: 'note', to: ship(o.to), text: text(o.text) }
     case 'dead':
       return ship(o.who) < 0 ? null : { t: 'dead', who: ship(o.who) }
+    case 'arrive':
+      return ship(o.who) < 0 ? null : { t: 'arrive', who: ship(o.who) }
     default:
       return null
   }
@@ -467,6 +484,8 @@ export abstract class Session {
   /** The scenario being flown and its briefing, when there is one. */
   title = ''
   brief = ''
+  /** Which wave of the enemy is on the field, and how many there are in all; [1, 1] when they are all there from the start. */
+  wave: [number, number] = [1, 1]
   /** How the two players are connected; null when flying solo. */
   via: Channel['via'] | null = null
   /** What can be seen happening between ships right now: webs, neutralizers, repairs and the like. */
@@ -536,6 +555,7 @@ export class HostSession extends Session {
   private sinceIdleSnap = 0
   private sinceRefresh = 0
   private sinceBots = 0
+  private untilWave = 0
   private loadouts: Loadout[]
   private combat: Combat
   private forGuest: CombatEvent[] = []
@@ -557,7 +577,9 @@ export class HostSession extends Session {
       this.loadouts.map((loadout) => computeStats(loadout, [])),
       Math.random,
       players.map((p) => p.team),
+      players.map((p) => p.wave > 0),
     )
+    this.wave = [1, 1 + Math.max(...players.map((p) => p.wave))]
     this.enlist(this.combat)
     this.syncViews()
     if (channel) {
@@ -575,6 +597,33 @@ export class HostSession extends Session {
 
   get solo() {
     return !this.channel
+  }
+
+  /**
+   * Brings on the next wave once every ship of the waves before it is
+   * destroyed, after a short pause. It arrives beyond the ships it has come
+   * for, on the far side from where they started.
+   */
+  private reinforce(elapsed: number) {
+    const next = this.wave[0]
+    if (next >= this.wave[1]) return
+    const earlier = this.players.some((p, i) => p.team === 1 && p.wave < next && !this.combat.ships[i].dead)
+    if (earlier) return
+    this.untilWave += elapsed
+    if (this.untilWave < WAVE_DELAY) return
+    this.untilWave = 0
+    const defenders = this.players.map((_, i) => i).filter((i) => this.players[i].team === 0 && !this.combat.ships[i].dead)
+    const centre: Vec3 = [0, 0, 0]
+    for (const i of defenders) this.world.ships[i].pos.forEach((x, axis) => (centre[axis] += x / defenders.length))
+    let slot = 0
+    this.players.forEach((player, i) => {
+      if (player.wave !== next) return
+      // Side by side, a few kilometres apart, so capital hulls do not arrive inside each other.
+      const across = Math.ceil(slot / 2) * (slot % 2 ? 1 : -1) * 6_000
+      slot++
+      this.combat.arrive(i, this.world, [centre[0] + across, centre[1], centre[2] + WAVE_RANGE])
+    })
+    this.wave = [next + 1, this.wave[1]]
   }
 
   /** Recomputes any ship whose numbers changed, and at intervals any ship under range-dependent effects. */
@@ -681,6 +730,7 @@ export class HostSession extends Session {
           if (player.bot && player.behaviour !== 'still') runBot(this.combat, this.world, index, player.behaviour !== 'passive')
         })
       }
+      this.reinforce(STEP_SECONDS)
       this.refresh(STEP_SECONDS)
       this.syncViews()
       this.owed -= STEP_SECONDS
@@ -714,6 +764,7 @@ export class HostSession extends Session {
       sights: sights(combat, 1).slice(0, this.players.length),
       events: this.forGuest.splice(0),
       links: this.links.map(([from, to, kind]) => [from, to, LINK_KINDS.indexOf(kind)]),
+      wave: this.wave,
       winner: combat.winner,
     })
   }
@@ -752,7 +803,9 @@ export class GuestSession extends Session {
       players.map((p) => computeStats(buildLoadout(p.fit, dataset, p.spec.radius), [])),
       Math.random,
       players.map((p) => p.team),
+      players.map((p) => p.wave > 0),
     )
+    this.wave = [1, 1 + Math.max(...players.map((p) => p.wave))]
     this.enlist(combat)
     this.own = ownView(combat, 1)
     this.sights = sights(combat, 1)
@@ -789,14 +842,14 @@ export class GuestSession extends Session {
     const seen = readSights(msg.sights, count)
     if (seen) {
       // Any drone or squadron the host did not list is docked or destroyed.
-      for (let i = count; i < all; i++) seen.push({ hp: [0, 0, 0], lock: 0, dead: true })
+      for (let i = count; i < all; i++) seen.push({ hp: [0, 0, 0], lock: 0, dead: true, away: false })
       for (const item of Array.isArray(msg.craft) ? msg.craft.slice(0, all) : []) {
         const c = Array.isArray(item) ? item.map((x) => num(x)) : []
         const i = c[0]
         if (c.length < 10 || !Number.isInteger(i) || i < count || i >= all) continue
         this.world.ships[i].pos = [c[1], c[2], c[3]]
         this.world.ships[i].vel = [c[4], c[5], c[6]]
-        seen[i] = { hp: [c[7], c[8], c[9]], lock: 0, dead: false }
+        seen[i] = { hp: [c[7], c[8], c[9]], lock: 0, dead: false, away: false }
       }
       this.sights = seen
     }
@@ -806,6 +859,7 @@ export class GuestSession extends Session {
         if (event) this.events.push(event)
       }
     }
+    if (Array.isArray(msg.wave) && msg.wave.length === 2 && msg.wave.every((x) => Number.isInteger(x) && x >= 1 && x < 50)) this.wave = [msg.wave[0], msg.wave[1]]
     if (Array.isArray(msg.links)) {
       this.links = msg.links.slice(0, 300).flatMap((item): Link[] => {
         const [from, to, kind] = Array.isArray(item) ? item : []

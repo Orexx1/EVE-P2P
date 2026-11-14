@@ -60,6 +60,11 @@ joins with the code flies on the same side.
   | Gate camp | Hurricane, Drake | Thorax, Rupture, Caracal, Incursus |
   | Battlecruiser escort | Thorax, Caracal | Hurricane, Merlin |
   | Under the guns | Rifter, Incursus | Apocalypse |
+  | The Angel and the Snake | Azariel, Vanquisher | Four waves of capitals: 2 dreadnoughts, 3 carriers, 2 supercarriers, then an Avatar and a dreadnought |
+
+  A scenario can bring its enemies on in waves: each arrives 35 km out, ten
+  seconds after everything before it is destroyed, and the fight is not over
+  until the last wave is.
 
 - **Sandbox** scenarios set only the opposition. Each player flies whatever fit
   they have loaded: a firing range of hulls that neither move nor shoot at 5,
@@ -112,6 +117,11 @@ The screen is laid out the way the game's is, so a pilot knows where to look.
   dampeners, tracking and guidance disruptors and painters change the target's
   numbers through the fitting engine. Neutralizers and nosferatu move capacitor.
   ECM rolls against sensor strength and breaks the lock.
+- **Doomsdays**: a titan's single-target superweapon builds for a few seconds,
+  then lands its whole damage on a capital ship, reduced only by resists. The
+  titan cannot move for 30 seconds after firing, and the weapon takes minutes to
+  fire again whatever becomes of the target. It will not fire at anything smaller
+  than a capital. Fuel is not counted, and the lance and area doomsdays do nothing.
 - **Stats follow the fit**: when a module switches on or off, the fitting engine
   recomputes the ship with exactly what is running and what is being done to it.
 - **Drones and fighters** are craft in space, not a number added to the ship's

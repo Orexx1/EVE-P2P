@@ -587,8 +587,14 @@ export class Hud {
         } else {
           push(event.who === me ? 'Your ship has been destroyed.' : `${who.name} destroyed.`, 'info')
         }
+      } else if (event.t === 'arrive') {
+        const who = entities[event.who]
+        if (who) push(`${who.name} has arrived${who.type && who.type !== who.name ? ` in a ${who.type}` : ''}.`, 'info')
       } else if (!mineIs(event.from) && !mineIs(event.to)) {
         continue
+      } else if (event.t === 'fire' && event.weapon === 'doomsday') {
+        // Everyone hears a doomsday fired at them coming; the hit is reported when it lands.
+        push(mineIs(event.from) ? `Your ${event.name} is firing.` : `${entities[event.from]?.name ?? 'A titan'} has fired a doomsday at you.`, mineIs(event.from) ? 'dealt' : 'taken')
       } else if (event.t === 'fire' && event.weapon === 'missile') {
         if (event.quality === 0) push(event.from === me ? `Your ${event.name} cannot reach the target.` : `${event.name} falls short of you.`, 'miss')
       } else {
@@ -823,7 +829,8 @@ export class Hud {
       const dead = !!s.sights[i]?.dead
       const ship = s.entities[i].kind === 'ship'
       // A drone or squadron is only listed while it is in space.
-      if (!ship) row.hidden = dead
+      // A reinforcement is not listed until it arrives.
+      row.hidden = ship ? !!s.sights[i]?.away : dead
       if (!row.hidden && !dead) listed++
       range.set(i, dead ? Infinity : dist(mine.pos, ships[i].pos))
       const lockOnMe = s.sights[i]?.lock ?? LOCK_NONE
@@ -858,7 +865,7 @@ export class Hud {
     this.el.order.textContent = describeOrder(mine.order) + about
     const t = Math.floor(s.world.time)
     const clock = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`
-    this.el.clock.textContent = s.started ? clock : ''
+    this.el.clock.textContent = s.started ? `${clock}${s.wave[1] > 1 ? `, wave ${s.wave[0]} of ${s.wave[1]}` : ''}` : ''
 
     // Own ship.
     const layers = [0, 1, 2].map((i) => percent(own.hp[i], own.hpMax[i]))

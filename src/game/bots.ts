@@ -3,7 +3,7 @@
 // its weapons, locks, runs its fit the obvious way, and sends out whatever
 // drones and fighters it carries. They issue the same commands and orders a
 // player would, so they are bound by the same rules.
-import { LOCK_LOCKED, LOCK_NONE, lockState, type Combat } from '../sim/combat'
+import { CAPITAL_SIGNATURE, LOCK_LOCKED, LOCK_NONE, lockState, type Combat } from '../sim/combat'
 import { dist } from '../sim/vec'
 import type { World } from '../sim/world'
 
@@ -20,8 +20,8 @@ export function preferredRange(combat: Combat, index: number): number {
 export function nearestEnemy(combat: Combat, world: World, index: number): number {
   let best = -1
   let bestRange = Infinity
-  combat.ships.forEach((ship, other) => {
-    if (other >= combat.shipCount || ship.dead || combat.teams[other] === combat.teams[index]) return
+  combat.ships.forEach((_, other) => {
+    if (other >= combat.shipCount || !combat.present(other) || combat.teams[other] === combat.teams[index]) return
     const range = dist(world.ships[index].pos, world.ships[other].pos)
     if (range < bestRange) {
       best = other
@@ -35,13 +35,13 @@ export function nearestEnemy(combat: Combat, world: World, index: number): numbe
 export function runBot(combat: Combat, world: World, index: number, fights = true) {
   const ship = combat.ships[index]
   const stats = combat.stats[index]
-  if (ship.dead || combat.winner !== null) return
+  if (ship.dead || ship.away || combat.winner !== null) return
 
   // Stay on the current target while it lives; otherwise take the nearest enemy.
   const order = world.ships[index].order
   const flying = 'target' in order ? order.target : -1
   let target = ship.active >= 0 ? ship.active : flying
-  if (target < 0 || combat.ships[target].dead || combat.teams[target] === combat.teams[index]) target = nearestEnemy(combat, world, index)
+  if (target < 0 || !combat.present(target) || combat.teams[target] === combat.teams[index]) target = nearestEnemy(combat, world, index)
   if (target < 0) {
     world.ships[index].order = { kind: 'stop' }
     return
@@ -64,6 +64,8 @@ export function runBot(combat: Combat, world: World, index: number, fights = tru
     if (m.kind === 'shieldBoost') want = ship.hp[0] < stats.hp[0] * 0.8
     if (m.kind === 'hullRep') want = ship.hp[2] < stats.hp[2] * 0.9
     if (m.kind === 'capBooster') want = ship.cap < stats.capMax * 0.5
+    // A doomsday is for capital ships, and fires once: asking again while it cools down would queue another.
+    if (m.kind === 'doomsday') want = !run.on && combat.stats[target].signature >= CAPITAL_SIGNATURE && ship.cap >= m.capNeed
     if (want !== run.wanted) combat.command(index, { c: 'mod', i, on: want }, world)
   })
   flyCraft(combat, world, index, target)

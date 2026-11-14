@@ -32,6 +32,10 @@ const EFFECT_KIND: Record<number, ModuleKind> = {
   6187: 'neut',
   6197: 'nos',
   6470: 'ecm',
+  4489: 'doomsday', // superWeaponAmarr
+  4490: 'doomsday', // superWeaponCaldari
+  4491: 'doomsday', // superWeaponGallente
+  4492: 'doomsday', // superWeaponMinmatar
 }
 /** What each kind of electronic warfare looks like from outside. */
 const EWAR_LOOK: Record<number, LinkKind> = { 6422: 'damp', 6423: 'track', 6424: 'track', 6425: 'paint' }
@@ -54,6 +58,11 @@ const NO_EFFECT_GROUPS = new Set([
 const ENERGY_WEAPON_GROUP = 53
 
 const A = {
+  emDamage: 114,
+  explosiveDamage: 116,
+  kineticDamage: 117,
+  thermalDamage: 118,
+  damageDelay: 1839,
   speedFactor: 20,
   capacity: 38,
   capacitorBonus: 67,
@@ -244,6 +253,16 @@ export function computeStats(own: Loadout, on: boolean[], projections: Projectio
         return moduleStats({ ...base, ...timing, projects: true, look: EWAR_LOOK[effect.id] ?? '' })
       case 'disrupt':
         return moduleStats({ ...base, ...timing })
+      case 'doomsday':
+        // No falloff and no range of its own: it reaches whatever the ship can lock.
+        return moduleStats({
+          ...base,
+          ...timing,
+          range: Infinity,
+          falloff: 0,
+          damage: [attr(A.emDamage), attr(A.thermalDamage), attr(A.kineticDamage), attr(A.explosiveDamage)],
+          flightTime: attr(A.damageDelay, 7500) / 1000,
+        })
       case 'neut':
         return moduleStats({ ...base, ...timing, amount: attr(A.energyNeutralizerAmount) })
       case 'nos':

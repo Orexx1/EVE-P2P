@@ -188,6 +188,195 @@ Mega Pulse Laser II, Scorch L
 Mega Pulse Laser II, Scorch L
 
 Warrior II x5`,
+  azariel: `[Azariel, The Angel]
+Damage Control II
+Gyrostabilizer II
+Gyrostabilizer II
+Gyrostabilizer II
+Capital Armor Repairer II
+Multispectrum Energized Membrane II
+Multispectrum Energized Membrane II
+
+10000MN Afterburner II
+Capital Capacitor Booster II, Navy Cap Booster 3200
+Sensor Booster II
+Tracking Computer II
+Tracking Computer II
+Heavy Stasis Grappler II
+Stasis Webifier II
+
+Hexa 2500mm Repeating Cannon II, Republic Fleet EMP XL
+Hexa 2500mm Repeating Cannon II, Republic Fleet EMP XL
+Hexa 2500mm Repeating Cannon II, Republic Fleet EMP XL
+Hexa 2500mm Repeating Cannon II, Republic Fleet EMP XL
+Hexa 2500mm Repeating Cannon II, Republic Fleet EMP XL
+Hexa 2500mm Repeating Cannon II, Republic Fleet EMP XL
+'Gjallarhorn' Explosive Doomsday
+Heavy Energy Neutralizer II
+
+Capital Trimark Armor Pump II
+Capital Trimark Armor Pump II
+Capital Trimark Armor Pump II`,
+  vanquisher: `[Vanquisher, The Snake]
+Damage Control II
+Magnetic Field Stabilizer II
+Magnetic Field Stabilizer II
+Magnetic Field Stabilizer II
+Capital Armor Repairer II
+Multispectrum Energized Membrane II
+Multispectrum Energized Membrane II
+25000mm Steel Plates II
+
+10000MN Afterburner II
+Capital Capacitor Booster II, Navy Cap Booster 3200
+Sensor Booster II
+Tracking Computer II
+Heavy Stasis Grappler II
+Stasis Webifier II
+
+Ion Siege Blaster II, Void XL
+Ion Siege Blaster II, Void XL
+Ion Siege Blaster II, Void XL
+Ion Siege Blaster II, Void XL
+Ion Siege Blaster II, Void XL
+Ion Siege Blaster II, Void XL
+'Aurora Ominae' Thermal Doomsday
+Heavy Energy Neutralizer II
+
+Capital Trimark Armor Pump II
+Capital Trimark Armor Pump II
+Capital Trimark Armor Pump II`,
+  naglfar: `[Naglfar, Gauntlet]
+Damage Control II
+Gyrostabilizer II
+Gyrostabilizer II
+
+10000MN Afterburner II
+Capital Shield Extender II
+Capital Shield Extender II
+Multispectrum Shield Hardener II
+
+Hexa 2500mm Repeating Cannon II, Republic Fleet EMP XL
+Hexa 2500mm Repeating Cannon II, Republic Fleet EMP XL
+Hexa 2500mm Repeating Cannon II, Republic Fleet EMP XL`,
+  moros: `[Moros, Gauntlet]
+Damage Control II
+Magnetic Field Stabilizer II
+Magnetic Field Stabilizer II
+25000mm Steel Plates II
+Multispectrum Energized Membrane II
+
+10000MN Afterburner II
+Heavy Stasis Grappler II
+
+Ion Siege Blaster II, Void XL
+Ion Siege Blaster II, Void XL
+Ion Siege Blaster II, Void XL`,
+  revelation: `[Revelation, Gauntlet]
+Damage Control II
+Heat Sink II
+Heat Sink II
+25000mm Steel Plates II
+Multispectrum Energized Membrane II
+
+10000MN Afterburner II
+
+Dual Giga Pulse Laser II, Scorch XL
+Dual Giga Pulse Laser II, Scorch XL
+Dual Giga Pulse Laser II, Scorch XL`,
+  thanatos: `[Thanatos, Gauntlet]
+Damage Control II
+Drone Damage Amplifier II
+Drone Damage Amplifier II
+25000mm Steel Plates II
+
+10000MN Afterburner II
+Sensor Booster II
+
+Fighter Support Unit II
+
+
+Firbolg II x18`,
+  archon: `[Archon, Gauntlet]
+Damage Control II
+Drone Damage Amplifier II
+Drone Damage Amplifier II
+25000mm Steel Plates II
+
+10000MN Afterburner II
+Sensor Booster II
+
+Fighter Support Unit II
+
+
+Templar II x18`,
+  nidhoggur: `[Nidhoggur, Gauntlet]
+Damage Control II
+Drone Damage Amplifier II
+Drone Damage Amplifier II
+
+10000MN Afterburner II
+Capital Shield Extender II
+Multispectrum Shield Hardener II
+
+Fighter Support Unit II
+
+
+Einherji II x18`,
+  nyx: `[Nyx, Gauntlet]
+Damage Control II
+Drone Damage Amplifier II
+Drone Damage Amplifier II
+25000mm Steel Plates II
+Multispectrum Energized Membrane II
+
+10000MN Afterburner II
+Sensor Booster II
+
+Fighter Support Unit II
+Fighter Support Unit II
+
+
+Firbolg II x18
+Cyclops II x12`,
+  hel: `[Hel, Gauntlet]
+Damage Control II
+Drone Damage Amplifier II
+Drone Damage Amplifier II
+
+10000MN Afterburner II
+Capital Shield Extender II
+Capital Shield Extender II
+Multispectrum Shield Hardener II
+
+Fighter Support Unit II
+Fighter Support Unit II
+
+
+Einherji II x18
+Tyrfing II x12`,
+  avatar: `[Avatar, Gauntlet]
+Damage Control II
+Heat Sink II
+Heat Sink II
+Heat Sink II
+25000mm Steel Plates II
+Multispectrum Energized Membrane II
+Multispectrum Energized Membrane II
+Capital Armor Repairer II
+
+10000MN Afterburner II
+Capital Capacitor Booster II, Navy Cap Booster 3200
+Sensor Booster II
+Tracking Computer II
+
+Dual Giga Pulse Laser II, Scorch XL
+Dual Giga Pulse Laser II, Scorch XL
+Dual Giga Pulse Laser II, Scorch XL
+Dual Giga Pulse Laser II, Scorch XL
+Dual Giga Pulse Laser II, Scorch XL
+Dual Giga Pulse Laser II, Scorch XL
+'Judgment' Electromagnetic Doomsday`,
 } satisfies Record<string, string>
 
 export type FitKey = keyof typeof SCENARIO_FITS
@@ -202,6 +391,8 @@ export interface ScenarioShip {
   count?: number
   behaviour?: Behaviour
   at?: Vec3
+  /** Leave out for a ship that is there from the start. 1, 2, 3... arrive in turn, each once everything before it is destroyed. */
+  wave?: number
 }
 
 export interface Scenario {
@@ -298,6 +489,25 @@ export const SCENARIOS: Scenario[] = [
     ],
   },
   {
+    id: 'titans',
+    title: 'The Angel and the Snake',
+    brief: 'An Azariel and a Vanquisher against a capital fleet that comes in four waves: dreadnoughts, then carriers, then supercarriers, then a titan of its own. A doomsday takes four minutes to fire again and only works on capital ships, so choose what deserves it.',
+    kind: 'challenge',
+    difficulty: 3,
+    pilots: ['azariel', 'vanquisher'],
+    enemies: [
+      { fit: 'naglfar', name: 'Naglfar' },
+      { fit: 'moros', name: 'Moros' },
+      { fit: 'thanatos', name: 'Thanatos', wave: 1 },
+      { fit: 'archon', name: 'Archon', wave: 1 },
+      { fit: 'nidhoggur', name: 'Nidhoggur', wave: 1 },
+      { fit: 'nyx', name: 'Nyx', wave: 2 },
+      { fit: 'hel', name: 'Hel', wave: 2 },
+      { fit: 'avatar', name: 'Avatar', wave: 3 },
+      { fit: 'revelation', name: 'Revelation', wave: 3 },
+    ],
+  },
+  {
     id: 'range',
     title: 'Firing range',
     brief: 'Four empty hulls that neither move nor shoot, from a frigate at 5 km to a battleship at 40 km. For finding out what your guns, missiles and drones do at each range and to each size.',
@@ -388,6 +598,7 @@ export function scenarioEnemies(scenario: Scenario): Extra[] {
       eft: eftOf(ship.fit),
       behaviour: ship.behaviour,
       at: ship.at,
+      wave: ship.wave,
     }))
   })
 }
