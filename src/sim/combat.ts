@@ -770,7 +770,9 @@ export class Combat {
   command(index: number, command: Command, world: World): string | null {
     const ship = this.ships[index]
     if (!ship || index >= this.shipCount) return null
-    if (this.winner !== null || ship.dead) return 'The fight is over.'
+    if (this.winner !== null) return 'The fight is over.'
+    // In a fight with several ships a side, a pilot can lose their ship while their side fights on.
+    if (ship.dead) return 'Your ship has been destroyed.'
     const range = (to: number) => dist(world.ships[index].pos, world.ships[to].pos)
 
     if (command.c === 'lock') {
