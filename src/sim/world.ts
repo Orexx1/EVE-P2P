@@ -1,4 +1,4 @@
-// The flight model. Two ships in open 3D space, each following one order.
+// The flight model. Ships in open 3D space, each following one order.
 //
 // EVE ships have no thrust-and-drag physics the player controls directly:
 // a ship always accelerates toward a wanted velocity, closing the gap
@@ -22,12 +22,13 @@ export interface ShipSpec {
   radius: number
 }
 
+/** `target` is the index of the ship the order is about. */
 export type Order =
   | { kind: 'stop' }
   | { kind: 'heading'; dir: Vec3 }
-  | { kind: 'approach' }
-  | { kind: 'orbit'; range: number }
-  | { kind: 'keep'; range: number }
+  | { kind: 'approach'; target: number }
+  | { kind: 'orbit'; target: number; range: number }
+  | { kind: 'keep'; target: number; range: number }
 
 export interface ShipState {
   pos: Vec3
@@ -38,7 +39,7 @@ export interface ShipState {
 export interface World {
   /** Seconds since the fight started. */
   time: number
-  ships: [ShipState, ShipState]
+  ships: ShipState[]
 }
 
 export const MAX_RANGE = 250_000
@@ -47,14 +48,29 @@ export function timeConstant(spec: ShipSpec): number {
   return Math.max((spec.mass * spec.agility) / 1e6, 0.05)
 }
 
-export function createWorld(separation = 15_000): World {
+/**
+ * Lays out a fight: team 0 on one side, team 1 on the other, `separation`
+ * metres apart, each team spread out in a line so no two ships start on top
+ * of each other. With two ships this is one each end of a line.
+ */
+export function createWorld(separation = 15_000, teams: number[] = [0, 1]): World {
   const half = separation / 2
+  const placed = [0, 0]
+  const size = [teams.filter((t) => t === 0).length, teams.filter((t) => t !== 0).length]
   return {
     time: 0,
-    ships: [
-      { pos: [0, 0, -half], vel: [0, 0, 0], order: { kind: 'stop' } },
-      { pos: [0, 0, half], vel: [0, 0, 0], order: { kind: 'stop' } },
-    ],
+    ships: teams.map((team) => {
+      const side = team === 0 ? 0 : 1
+      const slot = placed[side]++
+      // 0, +1, -1, +2, -2 ... steps of 1.5 km across the line of approach, staggered in height.
+      const step = Math.ceil(slot / 2) * (slot % 2 ? 1 : -1)
+      const spread = size[side] > 1 ? 1_500 : 0
+      return {
+        pos: [step * spread, (slot % 3) * spread * 0.2, side === 0 ? -half : half] as Vec3,
+        vel: [0, 0, 0] as Vec3,
+        order: { kind: 'stop' } as Order,
+      }
+    }),
   }
 }
 
@@ -67,11 +83,13 @@ function tangent(radial: Vec3, vel: Vec3): Vec3 {
 }
 
 /** The velocity a ship is trying to reach this instant, given its order. */
-export function wantedVelocity(ship: ShipState, other: ShipState, spec: ShipSpec): Vec3 {
+export function wantedVelocity(ship: ShipState, ships: ShipState[], spec: ShipSpec): Vec3 {
   const vmax = spec.maxVelocity
   const order = ship.order
   if (order.kind === 'stop' || vmax <= 0) return [0, 0, 0]
   if (order.kind === 'heading') return scale(norm(order.dir), vmax)
+  const other = ships[order.target]
+  if (!other || other === ship) return [0, 0, 0]
 
   const offset = sub(other.pos, ship.pos)
   const distance = len(offset)
@@ -105,32 +123,35 @@ function advance(ship: ShipState, wanted: Vec3, tau: number, dt: number): void {
   ship.vel = add(wanted, scale(gap, decay))
 }
 
-/** Advances the world by dt seconds. Both ships react to where the other was at the start of the step. */
-export function step(world: World, specs: [ShipSpec, ShipSpec], dt: number): void {
-  const [a, b] = world.ships
-  const wantA = wantedVelocity(a, b, specs[0])
-  const wantB = wantedVelocity(b, a, specs[1])
-  advance(a, wantA, timeConstant(specs[0]), dt)
-  advance(b, wantB, timeConstant(specs[1]), dt)
+/** Advances the world by dt seconds. Every ship reacts to where the others were at the start of the step. */
+export function step(world: World, specs: ShipSpec[], dt: number): void {
+  const wanted = world.ships.map((ship, i) => wantedVelocity(ship, world.ships, specs[i]))
+  world.ships.forEach((ship, i) => advance(ship, wanted[i], timeConstant(specs[i]), dt))
   world.time += dt
 }
 
-/** Validates an order that arrived over the network. Returns null for anything malformed. */
-export function parseOrder(raw: unknown): Order | null {
+/**
+ * Validates an order that arrived over the network, from the pilot of ship
+ * `self` in a fight of `count` ships. Returns null for anything malformed.
+ */
+export function parseOrder(raw: unknown, self = 1, count = 2): Order | null {
   if (!raw || typeof raw !== 'object') return null
   const o = raw as Record<string, unknown>
   const range = typeof o.range === 'number' && Number.isFinite(o.range) ? Math.max(0, Math.min(MAX_RANGE, o.range)) : null
+  // An order without a target is from a two-ship fight: it means the other ship.
+  const asked = o.target === undefined ? (self === 0 ? 1 : 0) : o.target
+  const target = Number.isInteger(asked) && (asked as number) >= 0 && (asked as number) < count && asked !== self ? (asked as number) : null
   switch (o.kind) {
     case 'stop':
       return { kind: 'stop' }
     case 'approach':
-      return { kind: 'approach' }
+      return target === null ? null : { kind: 'approach', target }
     case 'heading':
       return isVec3(o.dir) && len(o.dir) > 1e-6 ? { kind: 'heading', dir: norm(o.dir) } : null
     case 'orbit':
-      return range === null ? null : { kind: 'orbit', range }
+      return range === null || target === null ? null : { kind: 'orbit', target, range }
     case 'keep':
-      return range === null ? null : { kind: 'keep', range }
+      return range === null || target === null ? null : { kind: 'keep', target, range }
     default:
       return null
   }

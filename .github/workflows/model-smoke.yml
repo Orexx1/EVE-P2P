@@ -24,6 +24,9 @@ on:
       gfx:
         description: Graphics options for the fight check, as JSON
         required: false
+      extras:
+        description: Extra ships for the fight check, like "merlin:0,caracal:1" (0 ally, 1 enemy)
+        required: false
 
 jobs:
   smoke:
@@ -94,6 +97,7 @@ jobs:
         env:
           FIT: ${{ inputs.fit }}
           GFX: ${{ inputs.gfx }}
+          EXTRAS: ${{ inputs.extras || 'merlin:0,caracal:1' }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:

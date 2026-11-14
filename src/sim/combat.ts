@@ -1,7 +1,8 @@
 // The combat model: locking, module cycles, capacitor, damage and destruction.
 //
 // It runs on the host beside the flight model (world.ts), in the same fixed
-// steps, and is deterministic for a given random source. It knows nothing
+// steps, and is deterministic for a given random source. Any number of ships
+// can take part, in two teams; the fight ends when one team has none left. It knows nothing
 // about the fitting engine: each ship is described by a ShipStats value, and
 // when a module switching on or off would change those numbers (a propulsion
 // module, a hardener, a web on the other ship) the side is flagged in `dirty`
@@ -145,6 +146,8 @@ export interface ShipStats {
   capRecharge: number
   shieldRecharge: number
   lockRange: number
+  /** How many targets the ship can hold locked at once. */
+  maxLocked: number
   scanRes: number
   sensorStrength: number
   /** Index into a jam Quad, or -1 when the sensor type is mixed or unknown. */
@@ -167,6 +170,8 @@ export interface ModuleRun {
   reloading: number
   /** Strength of the current cycle: above 1 when it burned a boosting charge. */
   power: number
+  /** The ship this cycle is pointed at, or -1. */
+  target: number
 }
 
 export const LOCK_NONE = 0
@@ -175,31 +180,42 @@ export const LOCK_LOCKED = 2
 export type LockState = 0 | 1 | 2
 export type DroneState = 'bay' | 'outbound' | 'engaged' | 'returning'
 
+/** A target lock, complete once `left` reaches zero. */
+export interface Lock {
+  target: number
+  left: number
+  total: number
+}
+
 export interface ShipCombat {
   hp: [number, number, number]
   cap: number
-  lock: LockState
-  lockLeft: number
-  lockTotal: number
+  locks: Lock[]
+  /** The locked ship that modules are pointed at when switched on, or -1. */
+  active: number
   /** Seconds of sensor jamming left. */
   jammed: number
   modules: ModuleRun[]
-  drones: { state: DroneState; timer: number; cycle: number }
+  drones: { state: DroneState; timer: number; cycle: number; target: number }
   dead: boolean
   damageDealt: number
 }
 
 export type Command =
-  | { c: 'lock' }
-  | { c: 'unlock' }
+  | { c: 'lock'; t: number }
+  | { c: 'unlock'; t: number }
+  /** Make an already locked ship the one modules are pointed at. */
+  | { c: 'target'; t: number }
   | { c: 'mod'; i: number; on: boolean }
   | { c: 'drones'; on: boolean }
 
-/** Validates a command that arrived over the network. */
-export function parseCommand(raw: unknown): Command | null {
+/** Validates a command that arrived over the network, for a fight of `count` ships. */
+export function parseCommand(raw: unknown, count = 2): Command | null {
   if (!raw || typeof raw !== 'object') return null
   const o = raw as Record<string, unknown>
-  if (o.c === 'lock' || o.c === 'unlock') return { c: o.c }
+  if (o.c === 'lock' || o.c === 'unlock' || o.c === 'target') {
+    return Number.isInteger(o.t) && (o.t as number) >= 0 && (o.t as number) < count ? { c: o.c, t: o.t as number } : null
+  }
   if (o.c === 'mod' && Number.isInteger(o.i) && (o.i as number) >= 0 && (o.i as number) < 64 && typeof o.on === 'boolean') {
     return { c: 'mod', i: o.i as number, on: o.on }
   }
@@ -207,20 +223,30 @@ export function parseCommand(raw: unknown): Command | null {
   return null
 }
 
+/** How far along a ship's lock on `target` is. */
+export function lockState(ship: Pick<ShipCombat, 'locks'>, target: number): LockState {
+  const lock = ship.locks.find((l) => l.target === target)
+  return !lock ? LOCK_NONE : lock.left > 0 ? LOCK_LOCKING : LOCK_LOCKED
+}
+
 /** Hit quality, from a miss to a wrecking shot. */
 export const QUALITY = ['misses', 'glances off', 'grazes', 'hits', 'penetrates', 'smashes', 'wrecks'] as const
 
 export type CombatEvent =
-  /** A weapon fired. Turrets, drones and smartbombs land at once; missiles land `flight` seconds later. */
-  | { t: 'fire'; from: 0 | 1; weapon: 'turret' | 'missile' | 'drone' | 'bomb'; name: string; quality: number; damage: number; flight: number }
+  /**
+   * A weapon fired at ship `to`. Turrets, drones and smartbombs land at once;
+   * missiles land `flight` seconds later. A smartbomb that reaches nobody has `to` -1.
+   */
+  | { t: 'fire'; from: number; to: number; weapon: 'turret' | 'missile' | 'drone' | 'bomb'; name: string; quality: number; damage: number; flight: number }
   /** A missile volley arrived. */
-  | { t: 'impact'; from: 0 | 1; name: string; damage: number }
+  | { t: 'impact'; from: number; to: number; name: string; damage: number }
   /** Something only one pilot is told. */
-  | { t: 'note'; to: 0 | 1; text: string }
-  | { t: 'dead'; who: 0 | 1 }
+  | { t: 'note'; to: number; text: string }
+  | { t: 'dead'; who: number }
 
 interface Missile {
-  from: 0 | 1
+  from: number
+  to: number
   at: number
   name: string
   damage: Quad
@@ -291,90 +317,104 @@ function qualityOf(multiplier: number): number {
 
 const sum = (q: Quad) => q[0] + q[1] + q[2] + q[3]
 const times = (q: Quad, k: number): Quad => [q[0] * k, q[1] * k, q[2] * k, q[3] * k]
-const other = (side: 0 | 1): 0 | 1 => (side === 0 ? 1 : 0)
-const SIDES: Array<0 | 1> = [0, 1]
 
 function freshShip(stats: ShipStats): ShipCombat {
   return {
     hp: [...stats.hp],
     cap: stats.capMax,
-    lock: LOCK_NONE,
-    lockLeft: 0,
-    lockTotal: 0,
+    locks: [],
+    active: -1,
     jammed: 0,
-    modules: stats.modules.map((m) => ({ on: false, wanted: false, left: 0, total: m.cycle, charges: m.charges, reloading: 0, power: 1 })),
-    drones: { state: 'bay', timer: 0, cycle: 0 },
+    modules: stats.modules.map((m) => ({ on: false, wanted: false, left: 0, total: m.cycle, charges: m.charges, reloading: 0, power: 1, target: -1 })),
+    drones: { state: 'bay', timer: 0, cycle: 0, target: -1 },
     dead: false,
     damageDealt: 0,
   }
 }
 
 export class Combat {
-  ships: [ShipCombat, ShipCombat]
-  /** Sides whose stats need recomputing because a module changed state. */
-  dirty: [boolean, boolean] = [false, false]
+  ships: ShipCombat[]
+  /** Ships whose stats need recomputing because a module changed state. */
+  dirty: boolean[]
   /** Everything that happened since the caller last emptied this. */
   events: CombatEvent[] = []
-  /** Set when the fight is decided: the winning side, or 'draw'. */
+  /** Set when the fight is decided: the winning team, or 'draw'. */
   winner: 0 | 1 | 'draw' | null = null
   private missiles: Missile[] = []
   private time = 0
 
+  /** `teams[i]` is the side ship i fights for: 0 or 1. Two ships are one a side unless told otherwise. */
   constructor(
-    public stats: [ShipStats, ShipStats],
+    public stats: ShipStats[],
     private random: () => number = Math.random,
+    readonly teams: number[] = stats.map((_, i) => (i === 0 ? 0 : 1)),
   ) {
-    this.ships = [freshShip(stats[0]), freshShip(stats[1])]
+    this.ships = stats.map(freshShip)
+    this.dirty = stats.map(() => false)
   }
 
-  /** Replaces a side's numbers after a recompute, keeping its current state. */
-  setStats(side: 0 | 1, stats: ShipStats) {
-    const ship = this.ships[side]
-    this.stats[side] = stats
+  /** Replaces a ship's numbers after a recompute, keeping its current state. */
+  setStats(index: number, stats: ShipStats) {
+    const ship = this.ships[index]
+    this.stats[index] = stats
     for (let layer = 0; layer < 3; layer++) ship.hp[layer] = Math.min(ship.hp[layer], stats.hp[layer])
     ship.cap = Math.min(ship.cap, stats.capMax)
   }
 
-  /** Whether `side` currently has an active module of this kind on the other ship. */
-  applies(side: 0 | 1, kind: ModuleKind): boolean {
-    return this.stats[side].modules.some((m, i) => m.kind === kind && this.ships[side].modules[i].on)
+  /** Whether any ship has a running module of this kind pointed at `target`. */
+  under(target: number, kind: ModuleKind): boolean {
+    return this.ships.some(
+      (ship, s) => s !== target && !ship.dead && this.stats[s].modules.some((m, i) => m.kind === kind && ship.modules[i].on && ship.modules[i].target === target),
+    )
   }
 
   /** Carries out a pilot's command. Returns why not, if it cannot be done. */
-  command(side: 0 | 1, command: Command, world: World): string | null {
-    const ship = this.ships[side]
+  command(index: number, command: Command, world: World): string | null {
+    const ship = this.ships[index]
+    if (!ship) return null
     if (this.winner !== null || ship.dead) return 'The fight is over.'
-    const distance = len(sub(world.ships[0].pos, world.ships[1].pos))
+    const range = (to: number) => len(sub(world.ships[index].pos, world.ships[to].pos))
 
     if (command.c === 'lock') {
-      if (ship.lock !== LOCK_NONE) return null
+      const t = command.t
+      if (t === index || !this.ships[t]) return null
+      if (this.ships[t].dead) return 'That ship has been destroyed.'
+      if (lockState(ship, t) !== LOCK_NONE) return null
       if (ship.jammed > 0) return 'Your sensors are jammed.'
-      if (distance > this.stats[side].lockRange) return 'The target is beyond your targeting range.'
-      ship.lock = LOCK_LOCKING
-      ship.lockTotal = ship.lockLeft = lockTime(this.stats[side].scanRes, this.stats[other(side)].signature)
+      if (ship.locks.length >= Math.max(1, this.stats[index].maxLocked)) return 'You cannot lock any more targets.'
+      if (range(t) > this.stats[index].lockRange) return 'The target is beyond your targeting range.'
+      const total = lockTime(this.stats[index].scanRes, this.stats[t].signature)
+      ship.locks.push({ target: t, left: total, total })
       return null
     }
     if (command.c === 'unlock') {
-      this.dropLock(side, null)
+      this.dropLock(index, command.t, null)
+      return null
+    }
+    if (command.c === 'target') {
+      if (lockState(ship, command.t) !== LOCK_LOCKED) return 'Lock the target first.'
+      ship.active = command.t
       return null
     }
     if (command.c === 'drones') {
       const drones = ship.drones
-      if (!this.stats[side].drones.length) return 'This ship has no drones.'
+      if (!this.stats[index].drones.length) return 'This ship has no drones.'
       if (!command.on) {
-        if (drones.state === 'outbound' || drones.state === 'engaged') this.recallDrones(side, distance)
+        if (drones.state === 'outbound' || drones.state === 'engaged') this.recallDrones(index, world)
         return null
       }
       if (drones.state !== 'bay') return drones.state === 'returning' ? 'Your drones are still returning.' : null
-      if (ship.lock !== LOCK_LOCKED) return 'Lock the target first.'
-      if (distance > this.stats[side].droneRange) return 'The target is beyond drone control range.'
-      const speed = Math.max(...this.stats[side].drones.map((d) => d.speed), 1)
+      if (ship.active < 0) return 'Lock the target first.'
+      const distance = range(ship.active)
+      if (distance > this.stats[index].droneRange) return 'The target is beyond drone control range.'
+      const speed = Math.max(...this.stats[index].drones.map((d) => d.speed), 1)
       drones.state = 'outbound'
+      drones.target = ship.active
       drones.timer = Math.max(1, distance / speed)
       return null
     }
 
-    const spec = this.stats[side].modules[command.i]
+    const spec = this.stats[index].modules[command.i]
     const run = ship.modules[command.i]
     if (!spec || !run) return null
     if (!command.on) {
@@ -385,7 +425,7 @@ export class Combat {
     if (run.wanted) return null
     run.wanted = true
     if (run.on || run.reloading > 0) return null
-    const refusal = this.tryStart(side, command.i, world, distance)
+    const refusal = this.tryStart(index, command.i, world, true)
     if (refusal) run.wanted = false
     return refusal
   }
@@ -394,118 +434,141 @@ export class Combat {
   tick(world: World, dt: number) {
     if (this.winner !== null) return
     this.time += dt
-    const distance = len(sub(world.ships[0].pos, world.ships[1].pos))
+    const range = (a: number, b: number) => len(sub(world.ships[a].pos, world.ships[b].pos))
 
-    for (const side of SIDES) {
-      const ship = this.ships[side]
-      const stats = this.stats[side]
+    this.ships.forEach((ship, index) => {
+      if (ship.dead) return
+      const stats = this.stats[index]
       ship.cap = recharge(ship.cap, stats.capMax, stats.capRecharge, dt)
       ship.hp[0] = recharge(ship.hp[0], stats.hp[0], stats.shieldRecharge, dt)
       if (ship.jammed > 0) ship.jammed = Math.max(0, ship.jammed - dt)
 
-      if (ship.lock !== LOCK_NONE && distance > stats.lockRange) this.dropLock(side, 'Target lost: it is beyond your targeting range.')
-      if (ship.lock === LOCK_LOCKING) {
-        ship.lockLeft -= dt
-        if (ship.lockLeft <= 0) {
-          ship.lock = LOCK_LOCKED
-          ship.lockLeft = 0
+      for (const lock of [...ship.locks]) {
+        if (range(index, lock.target) > stats.lockRange) {
+          this.dropLock(index, lock.target, 'Target lost: it is beyond your targeting range.')
+        } else if (lock.left > 0) {
+          lock.left = Math.max(0, lock.left - dt)
+          if (lock.left === 0 && ship.active < 0) ship.active = lock.target
         }
       }
 
       // A warp scrambler shuts a microwarpdrive off at once.
-      if (this.applies(other(side), 'scram')) {
+      if (this.under(index, 'scram')) {
         stats.modules.forEach((m, i) => {
           const run = ship.modules[i]
           if (m.mwd && (run.on || run.wanted)) {
-            if (run.on) this.note(side, `${m.name} shut down: you are warp scrambled.`)
-            this.switchOff(side, i)
+            if (run.on) this.note(index, `${m.name} shut down: you are warp scrambled.`)
+            this.switchOff(index, i)
           }
         })
       }
-    }
+    })
 
-    for (const side of SIDES) {
-      const ship = this.ships[side]
-      for (let i = 0; i < ship.modules.length; i++) this.runModule(side, i, world, distance, dt)
-      this.runDrones(side, world, distance, dt)
-    }
+    this.ships.forEach((ship, index) => {
+      for (let i = 0; i < ship.modules.length; i++) this.runModule(index, i, world, dt)
+      this.runDrones(index, world, dt)
+    })
 
     this.missiles = this.missiles.filter((missile) => {
       if (missile.at > this.time) return true
-      if (!missile.reaches) return false
-      const target = other(missile.from)
-      const factor = missileFactor(this.stats[target].signature, len(world.ships[target].vel), missile)
-      const damage = this.damage(target, times(missile.damage, factor), missile.from)
-      this.events.push({ t: 'impact', from: missile.from, name: missile.name, damage })
+      if (!missile.reaches || this.ships[missile.to].dead) return false
+      const factor = missileFactor(this.stats[missile.to].signature, len(world.ships[missile.to].vel), missile)
+      const damage = this.damage(missile.to, times(missile.damage, factor), missile.from)
+      this.events.push({ t: 'impact', from: missile.from, to: missile.to, name: missile.name, damage })
       return false
     })
 
-    const dead = this.ships.map((s) => s.hp[2] <= 0)
-    if (dead[0] || dead[1]) {
-      for (const side of SIDES) {
-        if (!dead[side]) continue
-        this.ships[side].dead = true
-        this.events.push({ t: 'dead', who: side })
+    let died = false
+    this.ships.forEach((ship, index) => {
+      if (ship.dead || ship.hp[2] > 0) return
+      died = true
+      ship.dead = true
+      ship.modules.forEach((_, i) => this.switchOff(index, i))
+      ship.locks = []
+      ship.active = -1
+      this.events.push({ t: 'dead', who: index })
+      // Everyone loses their lock on a ship that no longer exists.
+      this.ships.forEach((_, other) => this.dropLock(other, index, null))
+    })
+    if (died) {
+      const alive = new Set(this.ships.map((ship, index) => (ship.dead ? -1 : this.teams[index])).filter((team) => team >= 0))
+      if (alive.size <= 1) {
+        this.winner = alive.size === 0 ? 'draw' : alive.has(0) ? 0 : 1
+        this.ships.forEach((ship, index) => ship.modules.forEach((_, i) => this.switchOff(index, i)))
       }
-      this.winner = dead[0] && dead[1] ? 'draw' : dead[0] ? 1 : 0
-      for (const side of SIDES) this.ships[side].modules.forEach((_, i) => this.switchOff(side, i))
     }
   }
 
-  private note(to: 0 | 1, text: string) {
+  private note(to: number, text: string) {
     this.events.push({ t: 'note', to, text })
   }
 
-  private flag(side: 0 | 1, spec: ModuleStats) {
-    if (spec.affectsOwn) this.dirty[side] = true
-    if (spec.projects) this.dirty[other(side)] = true
+  private flag(index: number, spec: ModuleStats, target: number) {
+    if (spec.affectsOwn) this.dirty[index] = true
+    if (spec.projects && target >= 0) this.dirty[target] = true
   }
 
-  private switchOff(side: 0 | 1, i: number) {
-    const run = this.ships[side].modules[i]
+  private switchOff(index: number, i: number) {
+    const run = this.ships[index].modules[i]
     run.wanted = false
     if (!run.on) return
     run.on = false
     run.left = 0
-    this.flag(side, this.stats[side].modules[i])
+    this.flag(index, this.stats[index].modules[i], run.target)
   }
 
-  private dropLock(side: 0 | 1, why: string | null) {
-    const ship = this.ships[side]
-    if (ship.lock === LOCK_NONE) return
-    ship.lock = LOCK_NONE
-    ship.lockLeft = 0
-    this.stats[side].modules.forEach((m, i) => {
-      if (m.needsTarget) this.switchOff(side, i)
+  private dropLock(index: number, target: number, why: string | null) {
+    const ship = this.ships[index]
+    const at = ship.locks.findIndex((l) => l.target === target)
+    if (at < 0) return
+    ship.locks.splice(at, 1)
+    this.stats[index].modules.forEach((m, i) => {
+      if (m.needsTarget && ship.modules[i].target === target) {
+        this.switchOff(index, i)
+        ship.modules[i].target = -1
+      }
     })
-    if (ship.drones.state === 'outbound' || ship.drones.state === 'engaged') this.recallDrones(side, 0)
-    if (why) this.note(side, why)
+    if (ship.drones.target === target && (ship.drones.state === 'outbound' || ship.drones.state === 'engaged')) {
+      ship.drones.state = 'returning'
+      ship.drones.timer = 3
+    }
+    if (ship.active === target) ship.active = ship.locks.find((l) => l.left === 0)?.target ?? -1
+    if (why) this.note(index, why)
   }
 
-  private recallDrones(side: 0 | 1, distance: number) {
-    const drones = this.ships[side].drones
-    const speed = Math.max(...this.stats[side].drones.map((d) => d.speed), 1)
+  private recallDrones(index: number, world: World) {
+    const drones = this.ships[index].drones
+    const speed = Math.max(...this.stats[index].drones.map((d) => d.speed), 1)
+    const distance = drones.target >= 0 ? len(sub(world.ships[index].pos, world.ships[drones.target].pos)) : 0
     drones.state = 'returning'
     drones.timer = Math.max(1, distance / speed)
   }
 
-  /** Starts a cycle if the module is able to. Returns the reason if it is not. */
-  private tryStart(side: 0 | 1, i: number, world: World, distance: number): string | null {
-    const ship = this.ships[side]
-    const spec = this.stats[side].modules[i]
+  /**
+   * Starts a cycle if the module is able to. Returns the reason if it is not.
+   * `fresh` is a pilot switching it on (it takes the active target); otherwise
+   * it is carrying on against the ship it was already pointed at.
+   */
+  private tryStart(index: number, i: number, world: World, fresh: boolean): string | null {
+    const ship = this.ships[index]
+    const spec = this.stats[index].modules[i]
     const run = ship.modules[i]
     if (spec.kind === 'passive') return `${spec.name} is always on.`
     if (spec.kind === 'unsupported') return spec.note || `${spec.name} has no effect in a duel.`
+    let target = -1
     if (spec.needsTarget) {
-      if (ship.lock !== LOCK_LOCKED) return 'Lock the target first.'
+      target = fresh || run.target < 0 ? ship.active : run.target
+      if (target < 0 || lockState(ship, target) !== LOCK_LOCKED) return 'Lock the target first.'
       // Webs, scramblers and the like have a hard limit; effects with falloff just weaken.
+      const distance = len(sub(world.ships[index].pos, world.ships[target].pos))
       if (spec.kind !== 'turret' && spec.kind !== 'missile' && spec.falloff <= 0 && distance > spec.range) {
         return `${spec.name}: the target is out of range.`
       }
     }
-    if (spec.mwd && this.applies(other(side), 'scram')) return 'You are warp scrambled: the microwarpdrive will not start.'
+    if (spec.mwd && this.under(index, 'scram')) return 'You are warp scrambled: the microwarpdrive will not start.'
     if (spec.charges > 0 && run.charges <= 0 && spec.autoReload) {
       run.reloading = Math.max(spec.reload, 0.1)
+      run.target = target
       return null
     }
     if (ship.cap < spec.capNeed) return `${spec.name}: not enough capacitor.`
@@ -517,17 +580,22 @@ export class Combat {
       run.power = spec.boost
     }
     const wasOn = run.on
+    const before = run.target
     run.on = true
+    run.target = target
     run.left = run.total = spec.cycle
-    if (!wasOn) this.flag(side, spec)
-    this.onCycleStart(side, spec, world, distance)
+    if (!wasOn || before !== target) {
+      this.flag(index, spec, target)
+      if (wasOn && before >= 0 && spec.projects) this.dirty[before] = true
+    }
+    this.onCycleStart(index, spec, run, world)
     return null
   }
 
-  private runModule(side: 0 | 1, i: number, world: World, distance: number, dt: number) {
-    const ship = this.ships[side]
+  private runModule(index: number, i: number, world: World, dt: number) {
+    const ship = this.ships[index]
     if (ship.dead) return
-    const spec = this.stats[side].modules[i]
+    const spec = this.stats[index].modules[i]
     const run = ship.modules[i]
 
     if (run.reloading > 0) {
@@ -539,44 +607,45 @@ export class Combat {
     if (run.on) {
       run.left -= dt
       if (run.left > 1e-9) return
-      this.onCycleEnd(side, spec, run)
-      if (!run.wanted) return this.switchOff(side, i)
+      this.onCycleEnd(index, spec, run)
+      if (!run.wanted) return this.switchOff(index, i)
       // Roll straight into the next cycle; the stats only change if it cannot.
-      const refusal = this.tryStart(side, i, world, distance)
+      const refusal = this.tryStart(index, i, world, false)
       if (refusal) {
-        this.note(side, refusal)
-        this.switchOff(side, i)
+        this.note(index, refusal)
+        this.switchOff(index, i)
       } else if (run.reloading > 0) {
         // Out of charges: the module rests while it reloads, then resumes.
         run.on = false
-        this.flag(side, spec)
+        this.flag(index, spec, run.target)
       }
       return
     }
     if (run.wanted && run.reloading <= 0) {
-      const refusal = this.tryStart(side, i, world, distance)
+      const refusal = this.tryStart(index, i, world, false)
       if (refusal) {
-        this.note(side, refusal)
+        this.note(index, refusal)
         run.wanted = false
       }
     }
   }
 
-  private onCycleStart(side: 0 | 1, spec: ModuleStats, world: World, distance: number) {
-    const ship = this.ships[side]
-    const foe = other(side)
-    const target = this.ships[foe]
+  private onCycleStart(index: number, spec: ModuleStats, run: ModuleRun, world: World) {
+    const ship = this.ships[index]
+    const to = run.target
+    const distance = to >= 0 ? len(sub(world.ships[index].pos, world.ships[to].pos)) : 0
     switch (spec.kind) {
       case 'turret': {
-        const chance = hitChance(angularVelocity(world.ships[side], world.ships[foe]), distance, this.stats[foe].signature, spec)
-        this.shoot(side, 'turret', spec.name, spec.damage!, chance)
+        const chance = hitChance(angularVelocity(world.ships[index], world.ships[to]), distance, this.stats[to].signature, spec)
+        this.shoot(index, to, 'turret', spec.name, spec.damage!, chance)
         break
       }
       case 'missile': {
         const flight = spec.missileSpeed > 0 ? distance / spec.missileSpeed : 0
         const reaches = flight <= spec.flightTime
         this.missiles.push({
-          from: side,
+          from: index,
+          to,
           at: this.time + Math.min(flight, spec.flightTime),
           name: spec.name,
           damage: spec.damage!,
@@ -585,69 +654,86 @@ export class Combat {
           drf: spec.drf,
           reaches,
         })
-        this.events.push({ t: 'fire', from: side, weapon: 'missile', name: spec.name, quality: reaches ? -1 : 0, damage: 0, flight: Math.min(flight, spec.flightTime) })
+        this.events.push({ t: 'fire', from: index, to, weapon: 'missile', name: spec.name, quality: reaches ? -1 : 0, damage: 0, flight: Math.min(flight, spec.flightTime) })
         break
       }
       case 'smartbomb': {
-        const hit = distance <= spec.range
-        const damage = hit ? this.damage(foe, spec.damage!, side) : 0
-        this.events.push({ t: 'fire', from: side, weapon: 'bomb', name: spec.name, quality: hit ? 3 : 0, damage, flight: 0 })
+        // A smartbomb hits everything around it, friend or foe.
+        let reached = false
+        this.ships.forEach((other, o) => {
+          if (o === index || other.dead || len(sub(world.ships[index].pos, world.ships[o].pos)) > spec.range) return
+          reached = true
+          const damage = this.damage(o, spec.damage!, index)
+          this.events.push({ t: 'fire', from: index, to: o, weapon: 'bomb', name: spec.name, quality: 3, damage, flight: 0 })
+        })
+        if (!reached) this.events.push({ t: 'fire', from: index, to: -1, weapon: 'bomb', name: spec.name, quality: 0, damage: 0, flight: 0 })
         break
       }
       case 'shieldBoost':
-        ship.hp[0] = Math.min(this.stats[side].hp[0], ship.hp[0] + spec.amount)
+        ship.hp[0] = Math.min(this.stats[index].hp[0], ship.hp[0] + spec.amount)
         break
       case 'capBooster':
-        ship.cap = Math.min(this.stats[side].capMax, ship.cap + spec.amount)
+        ship.cap = Math.min(this.stats[index].capMax, ship.cap + spec.amount)
         break
-      case 'neut':
+      case 'neut': {
+        const target = this.ships[to]
         target.cap = Math.max(0, target.cap - spec.amount * falloffFactor(distance, spec.range, spec.falloff))
         break
+      }
       case 'nos': {
         // A nosferatu only drains a target with proportionally more capacitor than its owner.
-        const mine = ship.cap / Math.max(this.stats[side].capMax, 1)
-        const theirs = target.cap / Math.max(this.stats[foe].capMax, 1)
+        const target = this.ships[to]
+        const mine = ship.cap / Math.max(this.stats[index].capMax, 1)
+        const theirs = target.cap / Math.max(this.stats[to].capMax, 1)
         if (theirs > mine) {
           const taken = Math.min(target.cap, spec.amount * falloffFactor(distance, spec.range, spec.falloff))
           target.cap -= taken
-          ship.cap = Math.min(this.stats[side].capMax, ship.cap + taken)
+          ship.cap = Math.min(this.stats[index].capMax, ship.cap + taken)
         }
         break
       }
       case 'ecm': {
-        const stats = this.stats[foe]
+        const stats = this.stats[to]
         const strength = spec.jam ? (stats.sensor >= 0 ? spec.jam[stats.sensor] : Math.max(...spec.jam)) : 0
         const chance = Math.min(1, (strength / Math.max(stats.sensorStrength, 0.01)) * falloffFactor(distance, spec.range, spec.falloff))
         if (this.random() < chance) {
+          const target = this.ships[to]
           target.jammed = spec.cycle
-          this.dropLock(foe, 'You have been jammed: your target lock is lost.')
-          this.note(side, `${spec.name} jams the target.`)
+          const had = target.locks.length > 0
+          for (const lock of [...target.locks]) this.dropLock(to, lock.target, null)
+          this.note(to, had ? 'You have been jammed: your target locks are lost.' : 'You have been jammed.')
+          this.note(index, `${spec.name} jams the target.`)
         }
         break
       }
     }
   }
 
-  private onCycleEnd(side: 0 | 1, spec: ModuleStats, run: ModuleRun) {
-    const ship = this.ships[side]
-    if (spec.kind === 'armorRep') ship.hp[1] = Math.min(this.stats[side].hp[1], ship.hp[1] + spec.amount * run.power)
-    if (spec.kind === 'hullRep') ship.hp[2] = Math.min(this.stats[side].hp[2], ship.hp[2] + spec.amount)
+  private onCycleEnd(index: number, spec: ModuleStats, run: ModuleRun) {
+    const ship = this.ships[index]
+    if (spec.kind === 'armorRep') ship.hp[1] = Math.min(this.stats[index].hp[1], ship.hp[1] + spec.amount * run.power)
+    if (spec.kind === 'hullRep') ship.hp[2] = Math.min(this.stats[index].hp[2], ship.hp[2] + spec.amount)
   }
 
-  private runDrones(side: 0 | 1, world: World, distance: number, dt: number) {
-    const ship = this.ships[side]
+  private runDrones(index: number, world: World, dt: number) {
+    const ship = this.ships[index]
     const drones = ship.drones
     if (ship.dead || drones.state === 'bay') return
-    const stats = this.stats[side]
-    const foe = other(side)
+    const stats = this.stats[index]
     if (drones.state === 'returning') {
       drones.timer -= dt
-      if (drones.timer <= 0) drones.state = 'bay'
+      if (drones.timer <= 0) {
+        drones.state = 'bay'
+        drones.target = -1
+      }
       return
     }
+    const to = drones.target
+    if (to < 0 || this.ships[to].dead) return this.recallDrones(index, world)
+    const distance = len(sub(world.ships[index].pos, world.ships[to].pos))
     if (distance > stats.droneRange) {
-      this.note(side, 'Your drones are out of control range and are returning.')
-      return this.recallDrones(side, distance)
+      this.note(index, 'Your drones are out of control range and are returning.')
+      return this.recallDrones(index, world)
     }
     if (drones.state === 'outbound') {
       drones.timer -= dt
@@ -658,39 +744,41 @@ export class Combat {
     drones.cycle -= dt
     if (drones.cycle > 0) return
     drones.cycle = Math.max(...stats.drones.map((d) => d.cycle), 1)
-    const speed = len(world.ships[foe].vel)
+    const speed = len(world.ships[to].vel)
     for (const drone of stats.drones) {
       // Drones orbit their target, so they fight at their own range and
       // orbit speed. A target that outruns them takes nothing.
       const chance =
         speed > drone.speed
           ? 0
-          : hitChance(drone.orbitRange > 0 ? drone.orbitSpeed / drone.orbitRange : 0, 0, this.stats[foe].signature, {
+          : hitChance(drone.orbitRange > 0 ? drone.orbitSpeed / drone.orbitRange : 0, 0, this.stats[to].signature, {
               range: drone.optimal,
               falloff: drone.falloff,
               tracking: drone.tracking,
               sigRes: drone.sigRes,
             })
-      for (let n = 0; n < drone.count; n++) this.shoot(side, 'drone', drone.name, drone.damage, chance)
+      for (let n = 0; n < drone.count; n++) this.shoot(index, to, 'drone', drone.name, drone.damage, chance)
     }
   }
 
   /** One turret-style shot: a single roll decides both whether it hits and how well. */
-  private shoot(side: 0 | 1, weapon: 'turret' | 'drone', name: string, damage: Quad, chance: number) {
+  private shoot(from: number, to: number, weapon: 'turret' | 'drone', name: string, damage: Quad, chance: number) {
+    // Guns that cycle in the same instant as the killing shot have nothing left to hit.
+    if (this.ships[to].hp[2] <= 0) return
     const roll = this.random()
     if (roll >= chance) {
-      this.events.push({ t: 'fire', from: side, weapon, name, quality: 0, damage: 0, flight: 0 })
+      this.events.push({ t: 'fire', from, to, weapon, name, quality: 0, damage: 0, flight: 0 })
       return
     }
     const multiplier = roll < 0.01 ? 3 : roll + 0.49
-    const dealt = this.damage(other(side), times(damage, multiplier), side)
-    this.events.push({ t: 'fire', from: side, weapon, name, quality: qualityOf(multiplier), damage: dealt, flight: 0 })
+    const dealt = this.damage(to, times(damage, multiplier), from)
+    this.events.push({ t: 'fire', from, to, weapon, name, quality: qualityOf(multiplier), damage: dealt, flight: 0 })
   }
 
   /** Applies a volley to shield, then armor, then hull. Returns the hit points removed. */
-  private damage(side: 0 | 1, volley: Quad, from: 0 | 1): number {
-    const ship = this.ships[side]
-    const resists = this.stats[side].resists
+  private damage(index: number, volley: Quad, from: number): number {
+    const ship = this.ships[index]
+    const resists = this.stats[index].resists
     let left = 1
     let dealt = 0
     for (let layer = 0; layer < 3 && left > 0; layer++) {

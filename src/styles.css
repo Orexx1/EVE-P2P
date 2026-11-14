@@ -704,3 +704,92 @@ dl.inline > div {
   color: var(--warn);
   font-size: 0.8125rem;
 }
+
+/* Extra ships: search, add to a side, see who is on each. */
+.roster {
+  margin-bottom: 0.875rem;
+}
+
+.roster summary {
+  cursor: pointer;
+  padding: 0.25rem 0;
+}
+
+.roster input[type='search'] {
+  margin-top: 0.375rem;
+}
+
+.roster ul {
+  list-style: none;
+  margin: 0.375rem 0 0;
+  padding: 0;
+}
+
+.roster li {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.3125rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.roster li.hint {
+  border-top: 0;
+}
+
+.roster-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.875rem;
+}
+
+.roster-name em {
+  color: var(--muted);
+  font-style: normal;
+  font-size: 0.75rem;
+}
+
+.roster button {
+  flex: none;
+  min-height: 2rem;
+  padding: 0.25rem 0.5rem;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--muted);
+  border-radius: 4px;
+  font: 500 0.8125rem/1.2 var(--font);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.roster-status {
+  color: var(--warn);
+  font-size: 0.875rem;
+}
+
+.roster-status:empty {
+  display: none;
+}
+
+.roster-sides {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-top: 0.625rem;
+}
+
+.roster-sides h3 {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.roster-sides > div:first-child h3 {
+  color: #8fd0ff;
+}
+
+.roster-sides > div:last-child h3 {
+  color: #ff8a70;
+}

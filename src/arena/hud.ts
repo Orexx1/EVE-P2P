@@ -1,9 +1,13 @@
 // The in-flight interface, laid out the way EVE pilots expect: ship status and
-// the module rack at the bottom centre, the locked target at the top, the
-// selected item and overview on the right, a bracket on the other ship, and
+// the module rack at the bottom centre, locked targets at the top, the
+// selected item and overview on the right, a bracket on every other ship, and
 // the combat log at the bottom left.
+//
+// One ship is "selected" at a time (tap its bracket or its overview row): the
+// selected item's buttons act on it. Locked targets appear as cards at the
+// top; the highlighted card is the one modules are pointed at when switched on.
 import type { Result, Session } from '../game/session'
-import { LOCK_LOCKED, LOCK_LOCKING, LOCK_NONE, QUALITY, type Command, type CombatEvent, type ModuleStats } from '../sim/combat'
+import { LOCK_LOCKED, LOCK_LOCKING, LOCK_NONE, QUALITY, lockState, type Command, type CombatEvent, type ModuleStats } from '../sim/combat'
 import { dist, len } from '../sim/vec'
 import { describeOrder, formatRange, type Order, type ShipState } from '../sim/world'
 import { esc, int } from '../ui/format'
@@ -79,10 +83,18 @@ export class Hud {
     this.stopGraphics?.()
   }
 
+  /** The ship the selected-item buttons act on. */
+  private selected: number
+  private brackets: HTMLButtonElement[] = []
+  private rows: HTMLElement[] = []
+  private targetsKey = ''
+
   constructor(private session: Session, handlers: HudHandlers) {
     const me = session.players[session.me]
-    const them = session.players[session.them]
     const rack = session.rack
+    const others = session.players.map((_, i) => i).filter((i) => i !== session.me)
+    const side = (i: number) => (session.players[i].team === session.myTeam ? 'ally' : 'enemy')
+    this.selected = others.find((i) => side(i) === 'enemy') ?? others[0]
     const rows = SLOT_ROWS.map(([slot, label]) => {
       const buttons = rack.map((m, i) => (m.slot === slot ? moduleButton(m, i) : '')).join('')
       return buttons ? `<div class="rack-row" role="group" aria-label="${label}">${buttons}</div>` : ''
@@ -102,27 +114,24 @@ export class Hud {
 
       <section class="gfx-panel panel" data-el="gfxPanel" aria-label="Graphics options" hidden></section>
 
-      <section class="target" data-el="target" aria-label="Locked target" hidden>
-        <h2>${esc(them.pilot)} <span class="sub" data-el="targetRange"></span></h2>
-        <div class="bars">
-          <div class="bar shield"><span data-el="tShield"></span></div>
-          <div class="bar armor"><span data-el="tArmor"></span></div>
-          <div class="bar hull"><span data-el="tHull"></span></div>
-        </div>
-        <p class="sub" data-el="targetState"></p>
-      </section>
+      <section class="targets" data-el="targets" aria-label="Locked targets"></section>
 
       <p class="hud-notice" data-el="notice" role="status"></p>
 
-      <button type="button" class="bracket" data-el="bracket" data-act="target" aria-label="Lock ${esc(them.pilot)}">
+      ${others
+        .map(
+          (i) => `
+      <button type="button" class="bracket ${side(i)}" data-ship="${i}" data-bracket aria-label="Select ${esc(session.players[i].pilot)}">
         <span class="bracket-mark"></span>
-        <span class="bracket-label" data-el="bracketLabel"></span>
-      </button>
+        <span class="bracket-label"></span>
+      </button>`,
+        )
+        .join('')}
 
       <aside class="hud-side">
         <section class="panel" aria-label="Selected item">
-          <h2>${esc(them.pilot)}</h2>
-          <p class="sub">${esc(them.fit.shipName)} <span data-el="selRange"></span></p>
+          <h2 data-el="selName"></h2>
+          <p class="sub"><span data-el="selType"></span> <span data-el="selRange"></span></p>
           <div class="actions">
             <div class="pair">
               <button type="button" class="primary" data-act="lock" data-el="lock">Lock target</button>
@@ -142,10 +151,14 @@ export class Hud {
           <table>
             <thead><tr><th>Name</th><th class="num">Distance</th><th class="num">Speed</th></tr></thead>
             <tbody>
-              <tr data-el="row">
-                <td>${esc(them.fit.shipName)}</td>
-                <td class="num" data-el="ovRange"></td><td class="num" data-el="ovSpeed"></td>
-              </tr>
+              ${others
+                .map(
+                  (i) => `
+              <tr class="${side(i)}" data-ship="${i}" data-row>
+                <td>${esc(session.players[i].pilot)}</td><td class="num"></td><td class="num"></td>
+              </tr>`,
+                )
+                .join('')}
             </tbody>
           </table>
         </section>
@@ -186,6 +199,8 @@ export class Hud {
     this.root.querySelectorAll<HTMLElement>('[data-el]').forEach((node) => (this.el[node.dataset.el!] = node))
     this.root.querySelectorAll<HTMLButtonElement>('[data-mod]').forEach((node) => (this.mods[Number(node.dataset.mod)] = node))
     this.root.querySelectorAll<HTMLElement>('[data-count]').forEach((node) => (this.counts[Number(node.dataset.count)] = node))
+    this.root.querySelectorAll<HTMLButtonElement>('[data-bracket]').forEach((node) => (this.brackets[Number(node.dataset.ship)] = node))
+    this.root.querySelectorAll<HTMLElement>('[data-row]').forEach((node) => (this.rows[Number(node.dataset.ship)] = node))
     // The icon covers the short name; if CCP's image server cannot be reached the name shows instead.
     this.root.querySelectorAll<HTMLImageElement>('.mod img').forEach((img) => img.addEventListener('error', () => img.remove()))
 
@@ -197,15 +212,32 @@ export class Hud {
         if (run) handlers.command({ c: 'mod', i: Number(mod), on: !run.wanted })
         return
       }
+      // A locked target's card: point modules at it, and select it.
+      const card = target.closest<HTMLElement>('[data-target]')?.dataset.target
+      if (card !== undefined) {
+        this.selected = Number(card)
+        handlers.command({ c: 'target', t: Number(card) })
+        return
+      }
+      // A ship in space or in the overview: select it. Tapping the bracket of
+      // the ship already selected starts a lock, but never drops one by accident.
+      const shipEl = target.closest<HTMLElement>('[data-ship]')
+      if (shipEl) {
+        const index = Number(shipEl.dataset.ship)
+        const again = index === this.selected && shipEl.hasAttribute('data-bracket')
+        this.selected = index
+        if (again && lockState(session.own, index) === LOCK_NONE) handlers.command({ c: 'lock', t: index })
+        this.lastText = 0
+        return
+      }
       const act = target.closest<HTMLElement>('[data-act]')?.dataset.act
       const range = (key: string) => Number((this.el[key] as HTMLSelectElement).value)
-      if (act === 'approach') handlers.order({ kind: 'approach' })
-      if (act === 'orbit') handlers.order({ kind: 'orbit', range: range('orbitRange') })
-      if (act === 'keep') handlers.order({ kind: 'keep', range: range('keepRange') })
+      const on = this.selected
+      if (act === 'approach') handlers.order({ kind: 'approach', target: on })
+      if (act === 'orbit') handlers.order({ kind: 'orbit', target: on, range: range('orbitRange') })
+      if (act === 'keep') handlers.order({ kind: 'keep', target: on, range: range('keepRange') })
       if (act === 'stop') handlers.order({ kind: 'stop' })
-      if (act === 'lock') handlers.command({ c: session.own.lock === LOCK_NONE ? 'lock' : 'unlock' })
-      // Tapping the ship in space starts a lock but never drops one by accident.
-      if (act === 'target' && session.own.lock === LOCK_NONE) handlers.command({ c: 'lock' })
+      if (act === 'lock') handlers.command({ c: lockState(session.own, on) === LOCK_NONE ? 'lock' : 'unlock', t: on })
       if (act === 'drones') handlers.command({ c: 'drones', on: session.own.drones.state === 'bay' })
       if (act === 'leave') handlers.leave()
       if (act === 'fullscreen') void this.fullscreen()
@@ -219,10 +251,10 @@ export class Hud {
     // Changing a distance while already orbiting or holding range applies it straight away.
     this.root.addEventListener('change', (event) => {
       const el = (event.target as HTMLElement).dataset.el
-      const kind = session.world.ships[session.me].order.kind
+      const order = session.world.ships[session.me].order
       const value = Number((event.target as HTMLSelectElement).value)
-      if (el === 'orbitRange' && kind === 'orbit') handlers.order({ kind: 'orbit', range: value })
-      if (el === 'keepRange' && kind === 'keep') handlers.order({ kind: 'keep', range: value })
+      if (el === 'orbitRange' && order.kind === 'orbit') handlers.order({ kind: 'orbit', target: order.target, range: value })
+      if (el === 'keepRange' && order.kind === 'keep') handlers.order({ kind: 'keep', target: order.target, range: value })
     })
   }
 
@@ -233,18 +265,25 @@ export class Hud {
     this.el.loading.textContent = percent === null || !this.session.started ? '' : `Loading ship models, ${percent}%`
   }
 
-  /** Adds what just happened to the combat log. */
+  /** Adds what just happened to the combat log: only what this pilot did or had done to them, as in game. */
   report(events: CombatEvent[]) {
     if (!events.length) return
     const me = this.session.me
-    const foe = this.session.players[this.session.them].fit.shipName
+    const players = this.session.players
+    let changed = false
+    const push = (text: string, cls: string) => {
+      this.push(text, cls)
+      changed = true
+    }
     for (const event of events) {
       if (event.t === 'note') {
-        this.push(event.text, 'note')
+        push(event.text, 'note')
       } else if (event.t === 'dead') {
-        this.push(event.who === me ? 'Your ship has been destroyed.' : `${foe} destroyed.`, 'note')
+        push(event.who === me ? 'Your ship has been destroyed.' : `${players[event.who].pilot} destroyed.`, 'note')
+      } else if (event.from !== me && event.to !== me) {
+        continue
       } else if (event.t === 'fire' && event.weapon === 'missile') {
-        if (event.quality === 0) this.push(event.from === me ? `Your ${event.name} cannot reach the target.` : `${event.name} falls short of you.`, 'miss')
+        if (event.quality === 0) push(event.from === me ? `Your ${event.name} cannot reach the target.` : `${event.name} falls short of you.`, 'miss')
       } else {
         const mine = event.from === me
         const missed = event.t === 'fire' && event.quality === 0
@@ -252,10 +291,10 @@ export class Hud {
         if (mine) this.dealt += event.damage
         else this.taken += event.damage
         const amount = missed ? '' : `: ${int(event.damage)}`
-        this.push(mine ? `Your ${event.name} ${verb}${amount}` : `${event.name} ${verb}${missed ? '' : ' you'}${amount}`, missed ? 'miss' : mine ? 'dealt' : 'taken')
+        push(mine ? `Your ${event.name} ${verb}${amount}` : `${event.name} ${verb}${missed ? '' : ' you'}${amount}`, missed ? 'miss' : mine ? 'dealt' : 'taken')
       }
     }
-    this.el.log.innerHTML = this.log.map((line) => `<li class="${line.cls}">${esc(line.text)}</li>`).join('')
+    if (changed) this.el.log.innerHTML = this.log.map((line) => `<li class="${line.cls}">${esc(line.text)}</li>`).join('')
   }
 
   private push(text: string, cls: string) {
@@ -274,18 +313,31 @@ export class Hud {
     }
   }
 
-  /** Called every frame with the interpolated ship states and the opponent's screen position. */
-  update(ships: [ShipState, ShipState], bracketAt: { x: number; y: number } | null, now: number) {
+  /** Picks something sensible when nothing valid is selected: the nearest living enemy, else any living ship. */
+  private reselect(ships: ShipState[]) {
+    const s = this.session
+    const alive = (i: number) => i !== s.me && !s.sights[i]?.dead
+    if (alive(this.selected)) return
+    const mine = ships[s.me].pos
+    const candidates = s.players.map((_, i) => i).filter(alive)
+    const enemies = candidates.filter((i) => s.players[i].team !== s.myTeam)
+    const pool = enemies.length ? enemies : candidates
+    if (pool.length) this.selected = pool.reduce((best, i) => (dist(mine, ships[i].pos) < dist(mine, ships[best].pos) ? i : best))
+  }
+
+  /** Called every frame with the interpolated ship states and a way to find a ship on screen. */
+  update(ships: ShipState[], project: (index: number) => { x: number; y: number } | null, now: number) {
     const s = this.session
     const own = s.own
-    const foe = s.foe
-    const bracket = this.el.bracket
-    if (bracketAt && !foe.dead) {
-      bracket.hidden = false
-      bracket.style.transform = `translate(${bracketAt.x.toFixed(1)}px, ${bracketAt.y.toFixed(1)}px)`
-    } else {
-      bracket.hidden = true
-    }
+    this.brackets.forEach((bracket, i) => {
+      const at = s.sights[i]?.dead ? null : project(i)
+      if (at) {
+        bracket.hidden = false
+        bracket.style.transform = `translate(${at.x.toFixed(1)}px, ${at.y.toFixed(1)}px)`
+      } else {
+        bracket.hidden = true
+      }
+    })
 
     // Module cycles sweep every frame; everything else changes five times a second.
     own.modules.forEach((run, i) => {
@@ -294,22 +346,48 @@ export class Hud {
     })
     if (now - this.lastText < 200) return
     this.lastText = now
+    this.reselect(ships)
 
     const mine = ships[s.me]
-    const theirs = ships[s.them]
-    const range = formatRange(dist(mine.pos, theirs.pos))
     const speed = len(mine.vel)
     const top = s.players[s.me].spec.maxVelocity
+    const rangeTo = (i: number) => formatRange(dist(mine.pos, ships[i].pos))
+    const sel = this.selected
+    const chosen = s.players[sel]
 
-    this.el.bracketLabel.textContent = range
-    this.el.selRange.textContent = range
-    this.el.ovRange.textContent = range
-    this.el.ovSpeed.textContent = `${int(len(theirs.vel))} m/s`
+    // Every other ship: its bracket and its overview row.
+    this.brackets.forEach((bracket, i) => {
+      const lock = lockState(own, i)
+      bracket.classList.toggle('locking', lock === LOCK_LOCKING)
+      bracket.classList.toggle('locked', lock === LOCK_LOCKED)
+      bracket.classList.toggle('selected', i === sel)
+      ;(bracket.lastElementChild as HTMLElement).textContent = i === sel || lock !== LOCK_NONE ? rangeTo(i) : ''
+    })
+    this.rows.forEach((row, i) => {
+      const dead = !!s.sights[i]?.dead
+      row.classList.toggle('dead', dead)
+      row.classList.toggle('selected', i === sel)
+      row.children[1].textContent = dead ? 'destroyed' : rangeTo(i)
+      row.children[2].textContent = dead ? '' : `${int(len(ships[i].vel))} m/s`
+    })
+
+    // Selected item.
+    if (chosen) {
+      this.el.selName.textContent = chosen.pilot
+      this.el.selType.textContent = chosen.fit.shipName
+      this.el.selRange.textContent = rangeTo(sel)
+      const lock = lockState(own, sel)
+      const left = own.locks.find((l) => l.target === sel)?.left ?? 0
+      this.el.lock.textContent = lock === LOCK_LOCKED ? 'Unlock' : lock === LOCK_LOCKING ? `Locking ${left.toFixed(1)} s` : 'Lock target'
+    }
+
     this.el.speed.textContent = int(speed)
     this.el.speedBar.style.width = `${top > 0 ? Math.min(100, (speed / top) * 100) : 0}%`
-    this.el.order.textContent = describeOrder(mine.order)
+    const about = 'target' in mine.order && s.players.length > 2 ? `, ${s.players[mine.order.target]?.pilot ?? ''}` : ''
+    this.el.order.textContent = describeOrder(mine.order) + about
     const t = Math.floor(s.world.time)
-    this.el.clock.textContent = s.started ? `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}` : ''
+    const clock = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`
+    this.el.clock.textContent = s.started ? clock : ''
 
     // Own ship.
     const layers = [0, 1, 2].map((i) => percent(own.hp[i], own.hpMax[i]))
@@ -320,8 +398,10 @@ export class Hud {
       `<span class="shield">${Math.round(layers[0])}%</span> <span class="armor">${Math.round(layers[1])}%</span> ` +
       `<span class="hull">${Math.round(layers[2])}%</span> <span class="cap">Cap ${Math.round(cap)}%</span>`
     const effects = [...own.effects]
-    if (foe.lock === LOCK_LOCKED) effects.unshift('Targeted')
-    else if (foe.lock === LOCK_LOCKING) effects.unshift('Being targeted')
+    const lockedBy = s.sights.filter((sight, i) => i !== s.me && !sight.dead && sight.lock === LOCK_LOCKED).length
+    const lockingBy = s.sights.filter((sight, i) => i !== s.me && !sight.dead && sight.lock === LOCK_LOCKING).length
+    if (lockedBy) effects.unshift(lockedBy > 1 ? `Targeted by ${lockedBy}` : 'Targeted')
+    else if (lockingBy) effects.unshift('Being targeted')
     this.el.effects.innerHTML = effects.map((e) => `<span>${esc(e)}</span>`).join('')
 
     // Modules.
@@ -344,18 +424,33 @@ export class Hud {
       this.el.drones.classList.toggle('on', state === 'engaged' || state === 'outbound')
     }
 
-    // Lock and target.
-    const locking = own.lock === LOCK_LOCKING
-    const locked = own.lock === LOCK_LOCKED
-    this.el.lock.textContent = locked ? 'Unlock' : locking ? `Locking ${own.lockLeft.toFixed(1)} s` : 'Lock target'
-    bracket.classList.toggle('locking', locking)
-    bracket.classList.toggle('locked', locked)
-    this.el.target.hidden = !locking && !locked
-    this.el.targetRange.textContent = range
-    this.el.targetState.textContent = locking ? `Locking, ${own.lockLeft.toFixed(1)} s` : ''
-    this.el.tShield.style.width = `${(foe.hp[0] * 100).toFixed(1)}%`
-    this.el.tArmor.style.width = `${(foe.hp[1] * 100).toFixed(1)}%`
-    this.el.tHull.style.width = `${(foe.hp[2] * 100).toFixed(1)}%`
+    // Locked targets: a card each. Rebuilt only when the set changes, so a tap is never lost mid-press.
+    const key = own.locks.map((l) => `${l.target}${l.left > 0 ? 'x' : ''}`).join(',') + `|${own.active}`
+    if (key !== this.targetsKey) {
+      this.targetsKey = key
+      this.el.targets.innerHTML = own.locks
+        .map(
+          (l) => `
+        <button type="button" class="target ${s.players[l.target].team === s.myTeam ? 'ally' : 'enemy'}${l.target === own.active ? ' active' : ''}" data-target="${l.target}"
+          aria-label="${esc(s.players[l.target].pilot)}${l.target === own.active ? ', active target' : ''}">
+          <span class="target-name">${esc(s.players[l.target].pilot)}</span>
+          <span class="bars">
+            <span class="bar shield"><span></span></span>
+            <span class="bar armor"><span></span></span>
+            <span class="bar hull"><span></span></span>
+          </span>
+          <span class="sub"></span>
+        </button>`,
+        )
+        .join('')
+    }
+    own.locks.forEach((l, n) => {
+      const card = this.el.targets.children[n] as HTMLElement | undefined
+      const sight = s.sights[l.target]
+      if (!card || !sight) return
+      card.querySelectorAll<HTMLElement>('.bar span').forEach((bar, layer) => (bar.style.width = `${(sight.hp[layer] * 100).toFixed(1)}%`))
+      ;(card.lastElementChild as HTMLElement).textContent = l.left > 0 ? `Locking ${l.left.toFixed(1)} s` : rangeTo(l.target)
+    })
 
     const opponent = s.players[s.them].pilot
     this.el.notice.textContent = s.started
@@ -369,9 +464,18 @@ export class Hud {
     if (s.result && s.result !== this.shownResult) {
       this.shownResult = s.result
       this.el.resultTitle.textContent = s.result === 'won' ? 'Victory' : s.result === 'lost' ? 'Defeat' : 'Draw'
-      this.el.resultText.textContent =
-        `${s.result === 'won' ? `You destroyed ${opponent}'s ${s.players[s.them].fit.shipName}` : s.result === 'lost' ? `${opponent} destroyed your ${s.players[s.me].fit.shipName}` : 'Both ships were destroyed'} ` +
-        `after ${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}. Damage dealt ${int(this.dealt)}, taken ${int(this.taken)}.`
+      const duel = s.players.length === 2
+      const outcome =
+        s.result === 'won'
+          ? duel
+            ? `You destroyed ${opponent}'s ${s.players[s.them].fit.shipName}`
+            : 'Your side destroyed every enemy ship'
+          : s.result === 'lost'
+            ? duel
+              ? `${opponent} destroyed your ${s.players[s.me].fit.shipName}`
+              : 'Your side was destroyed'
+            : 'Both sides were destroyed'
+      this.el.resultText.textContent = `${outcome} after ${clock}. Damage dealt ${int(this.dealt)}, taken ${int(this.taken)}.`
       this.el.result.hidden = false
       this.el.result.className = `outcome ${s.result}`
     }

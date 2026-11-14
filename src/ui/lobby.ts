@@ -1,9 +1,10 @@
 // The "fight with this fit" controls: create a room, join one by code, or fly solo.
 import type { FittingDataset } from 'eve-fit-engine'
 import type { LoadedFit } from '../fit/loadFit'
-import { cleanPilot, GuestSession, handshake, HostSession, specFor, type Player, type Session } from '../game/session'
+import { cleanPilot, GuestSession, handshake, HostSession, loadExtras, playerFor, type Session } from '../game/session'
 import { hostRoom, joinRoom, normaliseCode, type HostedRoom } from '../net/room'
 import { getGraphics, mountGraphicsPanel } from './graphics'
+import { createRoster } from './roster'
 
 const PILOT_KEY = 'eve-p2p:pilot'
 
@@ -19,6 +20,7 @@ export function createLobby(host: HTMLElement): Lobby {
       <label for="pilot">Pilot name</label>
       <input id="pilot" maxlength="32" autocomplete="nickname" placeholder="Pilot" />
       <div class="duel-choices">
+        <div id="roster"></div>
         <div class="duel-row">
           <button type="button" data-act="create">Create a room</button>
           <button type="button" data-act="solo">Fly solo</button>
@@ -66,6 +68,7 @@ export function createLobby(host: HTMLElement): Lobby {
     // No storage: the name just is not remembered.
   }
   mountGraphicsPanel(host.querySelector<HTMLElement>('#gfx')!)
+  const roster = createRoster(host.querySelector<HTMLElement>('#roster')!)
 
   /** Starts loading real hulls now, so they are ready by the time the fight opens. */
   const warm = (...fits: LoadedFit[]) => {
@@ -84,14 +87,14 @@ export function createLobby(host: HTMLElement): Lobby {
     status.textContent = message
   }
 
-  const me = (): Player & { eft: string } => {
+  const me = () => {
     const pilot = cleanPilot(pilotInput.value)
     try {
       localStorage.setItem(PILOT_KEY, pilot)
     } catch {
       // See above.
     }
-    return { pilot, eft: current!.eft, fit: current!.fit, spec: specFor(current!.fit) }
+    return { pilot, eft: current!.eft, fit: current!.fit }
   }
 
   const launch = async (session: Session) => {
@@ -106,6 +109,7 @@ export function createLobby(host: HTMLElement): Lobby {
   async function create() {
     const mine = me()
     const dataset = current!.dataset
+    const extras = roster.extras()
     const id = ++attempt
     setBusy(true)
     status.textContent = 'Opening a room…'
@@ -121,9 +125,10 @@ export function createLobby(host: HTMLElement): Lobby {
       if (id !== attempt) return channel.close()
       hosted = null
       status.textContent = `Opponent connected${channel.via === 'relay' ? ' through the relay' : ''}. Exchanging fits…`
-      const theirs = await handshake(channel, mine, dataset)
-      warm(mine.fit, theirs.fit)
-      await launch(new HostSession([mine, { ...theirs, spec: specFor(theirs.fit) }], channel, opened.code, dataset))
+      const theirs = await handshake(channel, { ...mine, extras }, dataset)
+      const players = [playerFor(mine.pilot, mine.fit, 0, false), playerFor(theirs.pilot, theirs.fit, 1, false), ...loadExtras(extras, dataset)]
+      warm(...players.map((p) => p.fit))
+      await launch(new HostSession(players, channel, opened.code, dataset))
     } catch (err) {
       if (id === attempt) fail(err)
     }
@@ -147,9 +152,11 @@ export function createLobby(host: HTMLElement): Lobby {
       })
       if (id !== attempt) return channel.close()
       status.textContent = `Connected${channel.via === 'relay' ? ' through the relay' : ''}. Exchanging fits…`
+      // The host's hello carries any extra ships it added.
       const theirs = await handshake(channel, mine, dataset)
-      warm(mine.fit, theirs.fit)
-      await launch(new GuestSession([{ ...theirs, spec: specFor(theirs.fit) }, mine], channel, code, dataset))
+      const players = [playerFor(theirs.pilot, theirs.fit, 0, false), playerFor(mine.pilot, mine.fit, 1, false), ...theirs.extras]
+      warm(...players.map((p) => p.fit))
+      await launch(new GuestSession(players, channel, code, dataset))
     } catch (err) {
       if (id === attempt) fail(err)
     }
@@ -157,8 +164,18 @@ export function createLobby(host: HTMLElement): Lobby {
 
   function solo() {
     const mine = me()
+    const dataset = current!.dataset
     const sparring = host.querySelector<HTMLInputElement>('#spar')!.checked
-    void launch(new HostSession([mine, { pilot: 'Practice target', fit: mine.fit, spec: { ...mine.spec } }], null, null, current!.dataset, sparring))
+    try {
+      const extras = loadExtras(roster.extras(), dataset)
+      // Ship 1 is the opponent. With enemies added, the first of them takes
+      // that place; otherwise it is a practice target flying a copy of your fit.
+      const first = extras.findIndex((p) => p.team === 1)
+      const opponent = first >= 0 ? extras.splice(first, 1)[0] : playerFor('Practice target', mine.fit, 1, true)
+      void launch(new HostSession([playerFor(mine.pilot, mine.fit, 0, false), opponent, ...extras], null, null, dataset, sparring || first >= 0))
+    } catch (err) {
+      fail(err)
+    }
   }
 
   host.addEventListener('click', (event) => {
@@ -179,6 +196,7 @@ export function createLobby(host: HTMLElement): Lobby {
   return {
     setFit(next) {
       current = next
+      roster.setFit(next)
       if (next) warm(next.fit)
       section.hidden = !next
       if (!next) reset()

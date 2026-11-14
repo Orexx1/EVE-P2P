@@ -5,12 +5,14 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { buildDataset } from '../src/data/dataset'
 import { loadFit } from '../src/fit/loadFit'
 import { SAMPLE_FITS } from '../src/fit/samples'
-import { buildLoadout, computeStats, type Loadout } from '../src/game/loadout'
+import { runBot } from '../src/game/bots'
+import { buildLoadout, computeStats, projects, type Loadout, type Projection } from '../src/game/loadout'
 import {
   Combat,
   LOCK_LOCKED,
   angularVelocity,
   hitChance,
+  lockState,
   lockTime,
   missileFactor,
   moduleStats,
@@ -40,46 +42,62 @@ const sample = (label: string) => SAMPLE_FITS.find((s) => s.label === label)!.ef
 const loadoutOf = (label: string): Loadout => buildLoadout(loadFit(sample(label), dataset), dataset, 50)
 const none: boolean[] = []
 
-/** Runs a fight the way the host session does: move, fight, recompute what changed. */
+/** Runs a fight the way the host session does: move, fight, recompute what changed. Ship i flies fits[i] for teams[i]. */
 class Duel {
-  world: World = createWorld(3_000)
-  loadouts: [Loadout, Loadout]
+  world: World
+  loadouts: Loadout[]
   combat: Combat
-  constructor(a: string, b: string, seed = 1) {
-    this.loadouts = [loadoutOf(a), loadoutOf(b)]
-    this.combat = new Combat([computeStats(this.loadouts[0], none, this.loadouts[1], none, 3_000), computeStats(this.loadouts[1], none, this.loadouts[0], none, 3_000)], seeded(seed))
+  constructor(...args: [string, string, number?] | [string[], number[], number?]) {
+    const fits = Array.isArray(args[0]) ? args[0] : [args[0], args[1] as string]
+    const teams = Array.isArray(args[1]) ? args[1] : [0, 1]
+    this.world = createWorld(3_000, teams)
+    this.loadouts = fits.map(loadoutOf)
+    this.combat = new Combat(
+      this.loadouts.map((loadout) => computeStats(loadout, none)),
+      seeded(args[2] ?? 1),
+      teams,
+    )
   }
-  specs(): [ShipSpec, ShipSpec] {
-    return this.combat.stats.map((s) => ({ maxVelocity: s.maxVelocity, mass: s.mass, agility: s.agility, radius: 50 })) as [ShipSpec, ShipSpec]
+  specs(): ShipSpec[] {
+    return this.combat.stats.map((s) => ({ maxVelocity: s.maxVelocity, mass: s.mass, agility: s.agility, radius: 50 }))
+  }
+  range(a: number, b: number) {
+    return Math.hypot(...this.world.ships[a].pos.map((v, i) => v - this.world.ships[b].pos[i]))
   }
   refresh() {
-    const on = (side: 0 | 1) => this.combat.ships[side].modules.map((m) => m.on)
-    const d = Math.hypot(...this.world.ships[0].pos.map((v, i) => v - this.world.ships[1].pos[i]))
-    for (const side of [0, 1] as const) {
-      if (!this.combat.dirty[side]) continue
-      this.combat.dirty[side] = false
-      const foe = side === 0 ? 1 : 0
-      this.combat.setStats(side, computeStats(this.loadouts[side], on(side), this.loadouts[foe], on(foe), d))
-    }
+    this.combat.ships.forEach((ship, index) => {
+      if (!this.combat.dirty[index]) return
+      this.combat.dirty[index] = false
+      const projections: Projection[] = []
+      this.combat.ships.forEach((other, o) => {
+        other.modules.forEach((run, i) => {
+          if (o !== index && run.on && run.target === index && projects(this.combat.stats[o].modules[i].kind)) {
+            projections.push({ from: this.loadouts[o], module: i, distance: this.range(o, index) })
+          }
+        })
+      })
+      this.combat.setStats(index, computeStats(this.loadouts[index], ship.modules.map((m) => m.on), projections))
+    })
   }
-  run(seconds: number) {
+  run(seconds: number, bots: number[] = []) {
     for (let t = 0; t < seconds - 1e-9 && this.combat.winner === null; t += 0.1) {
       step(this.world, this.specs(), 0.1)
       this.combat.tick(this.world, 0.1)
+      if (Math.round(t * 10) % 5 === 0) for (const bot of bots) runBot(this.combat, this.world, bot)
       this.refresh()
     }
   }
-  cmd(side: 0 | 1, raw: unknown) {
-    const refusal = this.combat.command(side, parseCommand(raw)!, this.world)
+  cmd(index: number, raw: unknown) {
+    const refusal = this.combat.command(index, parseCommand(raw, this.combat.ships.length)!, this.world)
     this.refresh()
     return refusal
   }
-  index(side: 0 | 1, name: string) {
-    return this.combat.stats[side].modules.findIndex((m) => m.name.includes(name))
+  index(ship: number, name: string) {
+    return this.combat.stats[ship].modules.findIndex((m) => m.name.includes(name))
   }
-  everythingOn(side: 0 | 1) {
-    this.combat.stats[side].modules.forEach((m, i) => {
-      if (m.kind !== 'passive' && m.kind !== 'unsupported') this.cmd(side, { c: 'mod', i, on: true })
+  everythingOn(ship: number) {
+    this.combat.stats[ship].modules.forEach((m, i) => {
+      if (m.kind !== 'passive' && m.kind !== 'unsupported') this.cmd(ship, { c: 'mod', i, on: true })
     })
   }
 }
@@ -125,6 +143,10 @@ describe('combat formulas', () => {
     expect(parseCommand({ c: 'mod', i: -1, on: true })).toBeNull()
     expect(parseCommand({ c: 'mod', i: 2 })).toBeNull()
     expect(parseCommand({ c: 'explode' })).toBeNull()
+    expect(parseCommand({ c: 'lock', t: 1 })).toEqual({ c: 'lock', t: 1 })
+    expect(parseCommand({ c: 'lock', t: 2 })).toBeNull()
+    expect(parseCommand({ c: 'lock', t: 2 }, 3)).toEqual({ c: 'lock', t: 2 })
+    expect(parseCommand({ c: 'lock' })).toBeNull()
     expect(parseCommand(null)).toBeNull()
   })
 })
@@ -133,7 +155,7 @@ describe('damage', () => {
   const dummy = (hp: [number, number, number]): ShipStats => ({
     maxVelocity: 0, mass: 1e6, agility: 1, signature: 100, hp,
     resists: [[0.5, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
-    capMax: 100, capRecharge: 100, shieldRecharge: 0, lockRange: 50_000, scanRes: 500, sensorStrength: 10, sensor: 0,
+    capMax: 100, capRecharge: 100, shieldRecharge: 0, lockRange: 50_000, maxLocked: 2, scanRes: 500, sensorStrength: 10, sensor: 0,
     modules: [moduleStats({ kind: 'turret', name: 'Test gun', needsTarget: true, damage: [100, 0, 0, 0], range: 50_000, tracking: 1000, cycle: 1 })],
     drones: [], droneRange: 0,
   })
@@ -142,8 +164,8 @@ describe('damage', () => {
     // Every roll 0.51: a hit for exactly 1.0x damage.
     const combat = new Combat([dummy([10, 10, 10]), dummy([20, 30, 100])], () => 0.51)
     const world = createWorld(1_000)
-    combat.command(0, { c: 'lock' }, world)
-    for (let i = 0; i < 100 && combat.ships[0].lock !== LOCK_LOCKED; i++) combat.tick(world, 0.1)
+    combat.command(0, { c: 'lock', t: 1 }, world)
+    for (let i = 0; i < 100 && lockState(combat.ships[0], 1) !== LOCK_LOCKED; i++) combat.tick(world, 0.1)
     expect(combat.command(0, { c: 'mod', i: 0, on: true }, world)).toBeNull()
     // 100 EM: 50 after shield resists. Shield absorbs 20 (40% of the volley);
     // the other 60% reaches armor unresisted as 60: 30 to armor, 30 to hull.
@@ -158,8 +180,8 @@ describe('damage', () => {
     const combat = new Combat([dummy([10, 10, 10]), dummy([0, 0, 150])], () => 0.51)
     const world = createWorld(1_000)
     expect(combat.command(0, { c: 'mod', i: 0, on: true }, world)).toMatch(/lock/i)
-    combat.command(0, { c: 'lock' }, world)
-    for (let i = 0; i < 100 && combat.ships[0].lock !== LOCK_LOCKED; i++) combat.tick(world, 0.1)
+    combat.command(0, { c: 'lock', t: 1 }, world)
+    for (let i = 0; i < 100 && lockState(combat.ships[0], 1) !== LOCK_LOCKED; i++) combat.tick(world, 0.1)
     combat.command(0, { c: 'mod', i: 0, on: true }, world)
     for (let i = 0; i < 30; i++) combat.tick(world, 0.1)
     expect(combat.winner).toBe(0)
@@ -194,7 +216,7 @@ describe('fits in a fight', () => {
 
   it('slows the target with a web, only inside its range', () => {
     const duel = new Duel('Rifter', 'Rifter')
-    duel.cmd(0, { c: 'lock' })
+    duel.cmd(0, { c: 'lock', t: 1 })
     duel.run(4)
     const before = duel.combat.stats[1].maxVelocity
     expect(duel.cmd(0, { c: 'mod', i: duel.index(0, 'Webifier'), on: true })).toBeNull()
@@ -203,7 +225,7 @@ describe('fits in a fight', () => {
 
     const far = new Duel('Rifter', 'Rifter')
     far.world = createWorld(20_000)
-    far.cmd(0, { c: 'lock' })
+    far.cmd(0, { c: 'lock', t: 1 })
     far.run(4)
     expect(far.cmd(0, { c: 'mod', i: far.index(0, 'Webifier'), on: true })).toMatch(/out of range/)
   })
@@ -213,7 +235,7 @@ describe('fits in a fight', () => {
     const mwd = duel.index(1, 'Microwarpdrive')
     duel.cmd(1, { c: 'mod', i: mwd, on: true })
     expect(duel.combat.stats[1].maxVelocity).toBeGreaterThan(2000)
-    duel.cmd(0, { c: 'lock' })
+    duel.cmd(0, { c: 'lock', t: 1 })
     duel.run(4)
     expect(duel.cmd(0, { c: 'mod', i: duel.index(0, 'Scrambler'), on: true })).toBeNull()
     duel.run(0.2)
@@ -224,12 +246,12 @@ describe('fits in a fight', () => {
 
   it('reloads launchers when they run dry and delivers missiles after their flight time', () => {
     const duel = new Duel('Caracal', 'Rifter')
-    duel.cmd(0, { c: 'lock' })
+    duel.cmd(0, { c: 'lock', t: 1 })
     // A cruiser's sensors take about 6.6 s to lock a frigate.
     duel.run(5)
-    expect(duel.combat.ships[0].lock).not.toBe(LOCK_LOCKED)
+    expect(lockState(duel.combat.ships[0], 1)).not.toBe(LOCK_LOCKED)
     duel.run(2)
-    expect(duel.combat.ships[0].lock).toBe(LOCK_LOCKED)
+    expect(lockState(duel.combat.ships[0], 1)).toBe(LOCK_LOCKED)
     const launcher = duel.index(0, 'Rapid Light')
     duel.cmd(0, { c: 'mod', i: launcher, on: true })
     expect(duel.combat.events.some((e) => e.t === 'fire' && e.weapon === 'missile' && e.flight > 0)).toBe(true)
@@ -240,10 +262,10 @@ describe('fits in a fight', () => {
 
   it('plays a whole Rifter mirror match to a kill', () => {
     const duel = new Duel('Rifter', 'Rifter', 7)
-    duel.world.ships[0].order = { kind: 'orbit', range: 1_000 }
-    duel.world.ships[1].order = { kind: 'orbit', range: 1_000 }
-    duel.cmd(0, { c: 'lock' })
-    duel.cmd(1, { c: 'lock' })
+    duel.world.ships[0].order = { kind: 'orbit', target: 1, range: 1_000 }
+    duel.world.ships[1].order = { kind: 'orbit', target: 0, range: 1_000 }
+    duel.cmd(0, { c: 'lock', t: 1 })
+    duel.cmd(1, { c: 'lock', t: 0 })
     duel.run(4)
     duel.everythingOn(0)
     duel.everythingOn(1)
@@ -259,7 +281,7 @@ describe('fits in a fight', () => {
   it('triples an ancillary armor repairer while its paste lasts', () => {
     const eft = '[Punisher, test]\nSmall Ancillary Armor Repairer, Nanite Repair Paste\n'
     const loadout = buildLoadout(loadFit(eft, dataset), dataset, 50)
-    const stats = computeStats(loadout, none, loadout, none, 3_000)
+    const stats = computeStats(loadout, none)
     const repairer = stats.modules[0]
     expect(repairer).toMatchObject({ kind: 'armorRep', charges: 8, boost: 3, autoReload: false })
     const combat = new Combat([stats, structuredClone(stats)], seeded())
@@ -280,7 +302,7 @@ describe('fits in a fight', () => {
     const duel = new Duel('Caracal', 'Rifter')
     expect(duel.combat.stats[0].drones[0]).toMatchObject({ name: 'Warrior II', count: 2, sigRes: 25 })
     expect(duel.cmd(0, { c: 'drones', on: true })).toMatch(/lock/i)
-    duel.cmd(0, { c: 'lock' })
+    duel.cmd(0, { c: 'lock', t: 1 })
     duel.run(7)
     expect(duel.cmd(0, { c: 'drones', on: true })).toBeNull()
     duel.run(20)
@@ -289,5 +311,87 @@ describe('fits in a fight', () => {
     duel.cmd(0, { c: 'drones', on: false })
     duel.run(5)
     expect(duel.combat.ships[0].drones.state).toBe('bay')
+  })
+})
+
+describe('fights with more than two ships', () => {
+  it('lines the two teams up facing each other without stacking ships', () => {
+    const world = createWorld(15_000, [0, 1, 0, 1, 1])
+    expect(world.ships.map((s) => Math.sign(s.pos[2]))).toEqual([-1, 1, -1, 1, 1])
+    const spots = new Set(world.ships.map((s) => s.pos.join(',')))
+    expect(spots.size).toBe(5)
+  })
+
+  it('holds several locks, points modules at the active one, and switches on command', () => {
+    const duel = new Duel(['Rifter', 'Rifter', 'Rifter'], [0, 1, 1])
+    expect(duel.cmd(0, { c: 'lock', t: 1 })).toBeNull()
+    expect(duel.cmd(0, { c: 'lock', t: 2 })).toBeNull()
+    expect(duel.cmd(0, { c: 'lock', t: 0 })).toBeNull()
+    duel.run(4)
+    const me = duel.combat.ships[0]
+    expect(me.locks.map((l) => l.target)).toEqual([1, 2])
+    // The first lock to finish becomes the active target.
+    expect(me.active).toBe(1)
+    const gun = duel.index(0, 'AutoCannon')
+    duel.cmd(0, { c: 'mod', i: gun, on: true })
+    expect(me.modules[gun].target).toBe(1)
+    duel.run(3)
+    expect(duel.combat.ships[1].hp[0]).toBeLessThan(duel.combat.stats[1].hp[0])
+    expect(duel.combat.ships[2].hp[0]).toBeCloseTo(duel.combat.stats[2].hp[0], 0)
+
+    // Switching target does not move a running module; turning it off and on does.
+    expect(duel.cmd(0, { c: 'target', t: 2 })).toBeNull()
+    duel.run(2)
+    expect(me.modules[gun].target).toBe(1)
+    duel.cmd(0, { c: 'mod', i: gun, on: false })
+    duel.run(2)
+    duel.cmd(0, { c: 'mod', i: gun, on: true })
+    expect(me.modules[gun].target).toBe(2)
+    expect(duel.cmd(0, { c: 'target', t: 0 })).toMatch(/lock/i)
+  })
+
+  it('webs only the ship the web is pointed at', () => {
+    const duel = new Duel(['Rifter', 'Rifter', 'Rifter'], [0, 1, 1])
+    duel.cmd(0, { c: 'lock', t: 2 })
+    duel.run(4)
+    const before = duel.combat.stats[2].maxVelocity
+    expect(duel.cmd(0, { c: 'mod', i: duel.index(0, 'Webifier'), on: true })).toBeNull()
+    expect(duel.combat.stats[2].maxVelocity).toBeCloseTo(before * 0.45, 0)
+    expect(duel.combat.stats[1].maxVelocity).toBeCloseTo(before, 0)
+  })
+
+  it('drops locks on a ship when it dies and ends only when a whole team is gone', () => {
+    const duel = new Duel(['Rifter', 'Rifter', 'Rifter'], [0, 1, 1], 3)
+    duel.cmd(0, { c: 'lock', t: 1 })
+    duel.run(4)
+    duel.combat.ships[1].hp = [0, 0, 1]
+    duel.cmd(0, { c: 'mod', i: duel.index(0, 'AutoCannon'), on: true })
+    duel.run(10)
+    expect(duel.combat.ships[1].dead).toBe(true)
+    expect(duel.combat.ships[0].locks).toEqual([])
+    expect(duel.combat.ships[0].active).toBe(-1)
+    expect(duel.combat.winner).toBeNull()
+    expect(duel.cmd(0, { c: 'lock', t: 1 })).toMatch(/destroyed/)
+    duel.combat.ships[2].hp = [0, 0, 0]
+    duel.run(1)
+    expect(duel.combat.winner).toBe(0)
+  })
+
+  it('lets computer pilots fight a two-against-two to the end', () => {
+    const duel = new Duel(['Rifter', 'Merlin', 'Merlin', 'Rifter'], [0, 1, 0, 1], 5)
+    duel.run(900, [0, 1, 2, 3])
+    expect(duel.combat.winner).not.toBeNull()
+    const dead = duel.combat.ships.map((s) => s.dead)
+    // Whichever side won, the other has nothing left.
+    const lost = duel.combat.winner === 0 ? [1, 3] : [0, 2]
+    if (duel.combat.winner !== 'draw') expect(lost.every((i) => dead[i])).toBe(true)
+    expect(duel.combat.ships.reduce((sum, s) => sum + s.damageDealt, 0)).toBeGreaterThan(5_000)
+  })
+
+  it('accepts an empty hull as a ship that can be shot but not shoot', () => {
+    const hull = buildLoadout(loadFit('[Caracal, Empty hull]', dataset), dataset, 100)
+    const stats = computeStats(hull, none)
+    expect(stats.modules).toEqual([])
+    expect(stats.hp[0]).toBeGreaterThan(500)
   })
 })

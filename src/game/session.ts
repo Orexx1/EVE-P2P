@@ -1,20 +1,23 @@
-// A duel session: who the two pilots are and the shared fight they are in.
+// A fight session: the ships in it, who flies each, and the shared fight.
 // The host's browser owns the simulation (flight and combat) and sends
 // snapshots; the guest sends orders and commands and draws what it is told.
 // Each pilot is only sent what the game would show them: everything about
-// their own ship, and the other ship's shield, armor and hull.
-// Solo play is a host with a scripted opponent.
+// their own ship, and every other ship's shield, armor and hull.
+//
+// Ship 0 is the host's and ship 1 is the guest's (or the practice target when
+// flying solo). Any ships after that are extras the host added to either
+// team, flown by the computer.
 import type { FittingDataset } from 'eve-fit-engine'
 import { FitError, loadFit, type LoadedFit } from '../fit/loadFit'
 import type { Channel } from '../net/room'
 import {
   Combat,
-  LOCK_LOCKED,
-  LOCK_NONE,
+  lockState,
   parseCommand,
   type Command,
   type CombatEvent,
   type DroneState,
+  type Lock,
   type LockState,
   type ModuleRun,
   type ModuleStats,
@@ -22,17 +25,31 @@ import {
 } from '../sim/combat'
 import { dist, isVec3 } from '../sim/vec'
 import { createWorld, parseOrder, step, type Order, type ShipSpec, type World } from '../sim/world'
-import { buildLoadout, computeStats, type Loadout } from './loadout'
+import { runBot } from './bots'
+import { buildLoadout, computeStats, projects, type Loadout, type Projection } from './loadout'
 
-const PROTOCOL = 2
+const PROTOCOL = 3
 const STEP_SECONDS = 0.1
 const MAX_EFT_LENGTH = 20_000
 const MAX_PILOT_LENGTH = 32
+/** Extra ships a host may add, across both teams. */
+export const MAX_EXTRAS = 10
 
 export interface Player {
   pilot: string
   fit: LoadedFit
   spec: ShipSpec
+  /** 0 fights beside the host, 1 against. */
+  team: number
+  /** Flown by the computer. */
+  bot: boolean
+}
+
+/** An extra ship as the host set it up, before its fit is computed. */
+export interface Extra {
+  team: number
+  pilot: string
+  eft: string
 }
 
 export function specFor(fit: LoadedFit): ShipSpec {
@@ -50,15 +67,36 @@ export function cleanPilot(name: string): string {
   return name.replace(/\s+/g, ' ').trim().slice(0, MAX_PILOT_LENGTH) || 'Pilot'
 }
 
-/** Swaps fits with the other player. Rejects if theirs cannot be read. */
+export const playerFor = (pilot: string, fit: LoadedFit, team: number, bot: boolean): Player => ({ pilot, fit, spec: specFor(fit), team, bot })
+
+/** Turns the host's list of extra ships into players. Throws a FitError if one cannot be read. */
+export function loadExtras(extras: Extra[], dataset: FittingDataset): Player[] {
+  return extras.map((extra) => playerFor(cleanPilot(extra.pilot), loadFit(extra.eft, dataset), extra.team === 0 ? 0 : 1, true))
+}
+
+function readExtras(raw: unknown): Extra[] | null {
+  if (raw === undefined) return []
+  if (!Array.isArray(raw) || raw.length > MAX_EXTRAS) return null
+  const extras: Extra[] = []
+  for (const item of raw as Array<Record<string, unknown> | null>) {
+    if (typeof item?.eft !== 'string' || item.eft.length > MAX_EFT_LENGTH || typeof item.pilot !== 'string') return null
+    extras.push({ team: item.team === 0 ? 0 : 1, pilot: item.pilot, eft: item.eft })
+  }
+  return extras
+}
+
+/**
+ * Swaps fits with the other player. The host also sends the extra ships it
+ * added. Rejects if anything received cannot be read.
+ */
 export function handshake(
   channel: Channel,
-  mine: { pilot: string; eft: string },
+  mine: { pilot: string; eft: string; extras?: Extra[] },
   dataset: FittingDataset,
-): Promise<{ pilot: string; fit: LoadedFit }> {
+): Promise<{ pilot: string; fit: LoadedFit; extras: Player[] }> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => finish(new Error('The other player did not respond.')), 15_000)
-    const finish = (result: Error | { pilot: string; fit: LoadedFit }) => {
+    const finish = (result: Error | { pilot: string; fit: LoadedFit; extras: Player[] }) => {
       clearTimeout(timer)
       channel.onMessage = null
       channel.onClose = null
@@ -73,25 +111,25 @@ export function handshake(
     channel.onMessage = (raw) => {
       const msg = raw as Record<string, unknown> | null
       if (msg?.t === 'reject') {
-        return finish(new Error(`The other player could not load your fit: ${String(msg.reason).slice(0, 300)}`))
+        return finish(new Error(`The other player could not load a fit: ${String(msg.reason).slice(0, 300)}`))
       }
       if (msg?.t !== 'hello') return
       if (msg.v !== PROTOCOL) {
         return finish(new Error('You and the other player are on different versions of the site. Both reload the page and try again.'))
       }
-      if (typeof msg.eft !== 'string' || msg.eft.length > MAX_EFT_LENGTH || typeof msg.pilot !== 'string') {
+      const extras = readExtras(msg.extras)
+      if (typeof msg.eft !== 'string' || msg.eft.length > MAX_EFT_LENGTH || typeof msg.pilot !== 'string' || !extras) {
         return finish(new Error('The other player sent a fit that could not be read.'))
       }
       try {
-        resolve_(msg.pilot, loadFit(msg.eft, dataset))
+        finish({ pilot: cleanPilot(msg.pilot), fit: loadFit(msg.eft, dataset), extras: loadExtras(extras, dataset) })
       } catch (err) {
         const reason = err instanceof FitError ? err.message : 'unreadable fit'
         channel.send({ t: 'reject', reason })
-        finish(new Error(`The other player's fit could not be loaded: ${reason}`))
+        finish(new Error(`A fit from the other player could not be loaded: ${reason}`))
       }
     }
-    const resolve_ = (pilot: string, fit: LoadedFit) => finish({ pilot: cleanPilot(pilot), fit })
-    channel.send({ t: 'hello', v: PROTOCOL, pilot: mine.pilot, eft: mine.eft })
+    channel.send({ t: 'hello', v: PROTOCOL, pilot: mine.pilot, eft: mine.eft, extras: mine.extras ?? [] })
   })
 }
 
@@ -101,9 +139,9 @@ export interface OwnView {
   hpMax: [number, number, number]
   cap: number
   capMax: number
-  lock: LockState
-  lockLeft: number
-  lockTotal: number
+  locks: Lock[]
+  /** The locked ship modules are pointed at, or -1. */
+  active: number
   jammed: number
   modules: ModuleRun[]
   drones: { state: DroneState; timer: number }
@@ -111,11 +149,11 @@ export interface OwnView {
   effects: string[]
 }
 
-/** What a pilot can see of the other ship. */
-export interface FoeView {
+/** What a pilot can see of another ship. */
+export interface Sight {
   /** Shield, armor and hull as fractions. */
   hp: [number, number, number]
-  /** Their lock on you. */
+  /** That ship's lock on you. */
   lock: LockState
   dead: boolean
 }
@@ -130,25 +168,27 @@ const EFFECT_LABEL: Partial<Record<ModuleStats['kind'], string>> = {
   nos: 'Drained',
 }
 
-function ownView(combat: Combat, side: 0 | 1): OwnView {
-  const ship = combat.ships[side]
-  const stats = combat.stats[side]
-  const foe = side === 0 ? 1 : 0
+function ownView(combat: Combat, index: number): OwnView {
+  const ship = combat.ships[index]
+  const stats = combat.stats[index]
   const effects = new Set<string>()
   if (ship.jammed > 0) effects.add('Jammed')
-  combat.stats[foe].modules.forEach((m, i) => {
-    if (!combat.ships[foe].modules[i].on) return
-    const label = m.kind === 'ewar' ? m.name : EFFECT_LABEL[m.kind]
-    if (label) effects.add(label)
+  combat.ships.forEach((other, o) => {
+    if (o === index || other.dead) return
+    combat.stats[o].modules.forEach((m, i) => {
+      const run = other.modules[i]
+      if (!run.on || run.target !== index) return
+      const label = m.kind === 'ewar' ? m.name : EFFECT_LABEL[m.kind]
+      if (label) effects.add(label)
+    })
   })
   return {
     hp: [...ship.hp],
     hpMax: [...stats.hp],
     cap: ship.cap,
     capMax: stats.capMax,
-    lock: ship.lock,
-    lockLeft: ship.lockLeft,
-    lockTotal: ship.lockTotal,
+    locks: ship.locks.map((l) => ({ ...l })),
+    active: ship.active,
     jammed: ship.jammed,
     modules: ship.modules.map((m) => ({ ...m })),
     drones: { state: ship.drones.state, timer: ship.drones.timer },
@@ -156,14 +196,16 @@ function ownView(combat: Combat, side: 0 | 1): OwnView {
   }
 }
 
-function foeView(combat: Combat, side: 0 | 1): FoeView {
-  const ship = combat.ships[side]
-  const max = combat.stats[side].hp
-  return {
-    hp: [0, 1, 2].map((i) => (max[i] > 0 ? ship.hp[i] / max[i] : 0)) as [number, number, number],
-    lock: ship.lock,
-    dead: ship.dead,
-  }
+/** Every ship as `viewer` sees it. */
+function sights(combat: Combat, viewer: number): Sight[] {
+  return combat.ships.map((ship, index) => {
+    const max = combat.stats[index].hp
+    return {
+      hp: [0, 1, 2].map((i) => (max[i] > 0 ? ship.hp[i] / max[i] : 0)) as [number, number, number],
+      lock: lockState(ship, viewer),
+      dead: ship.dead,
+    }
+  })
 }
 
 function applyNav(spec: ShipSpec, stats: Pick<ShipStats, 'maxVelocity' | 'mass' | 'agility'>) {
@@ -181,58 +223,70 @@ const lockOf = (x: unknown): LockState => (x === 1 || x === 2 ? x : 0)
 const DRONE_STATES: DroneState[] = ['bay', 'outbound', 'engaged', 'returning']
 
 /** Reads a view the host sent, tolerating anything missing or malformed. */
-function readOwnView(raw: unknown, slots: number): OwnView | null {
+function readOwnView(raw: unknown, slots: number, count: number): OwnView | null {
   if (!raw || typeof raw !== 'object') return null
   const o = raw as Record<string, unknown>
   const modules = Array.isArray(o.modules) ? o.modules : []
   const drones = (o.drones ?? {}) as Record<string, unknown>
+  const shipIndex = (x: unknown) => (Number.isInteger(x) && (x as number) >= 0 && (x as number) < count ? (x as number) : -1)
   return {
     hp: triple(o.hp),
     hpMax: triple(o.hpMax),
     cap: num(o.cap),
     capMax: num(o.capMax),
-    lock: lockOf(o.lock),
-    lockLeft: num(o.lockLeft),
-    lockTotal: num(o.lockTotal),
+    locks: (Array.isArray(o.locks) ? o.locks : [])
+      .slice(0, 16)
+      .map((l: Record<string, unknown> | null) => ({ target: shipIndex(l?.target), left: num(l?.left), total: num(l?.total, 1) }))
+      .filter((l) => l.target >= 0),
+    active: shipIndex(o.active),
     jammed: num(o.jammed),
     modules: Array.from({ length: slots }, (_, i) => {
       const m = (modules[i] ?? {}) as Record<string, unknown>
-      return { on: m.on === true, wanted: m.wanted === true, left: num(m.left), total: num(m.total, 1), charges: num(m.charges), reloading: num(m.reloading), power: num(m.power, 1) }
+      return {
+        on: m.on === true,
+        wanted: m.wanted === true,
+        left: num(m.left),
+        total: num(m.total, 1),
+        charges: num(m.charges),
+        reloading: num(m.reloading),
+        power: num(m.power, 1),
+        target: shipIndex(m.target),
+      }
     }),
     drones: { state: DRONE_STATES.find((s) => s === drones.state) ?? 'bay', timer: num(drones.timer) },
     effects: Array.isArray(o.effects) ? o.effects.filter((e): e is string => typeof e === 'string').slice(0, 12).map((e) => e.slice(0, 60)) : [],
   }
 }
 
-function readFoeView(raw: unknown): FoeView | null {
-  if (!raw || typeof raw !== 'object') return null
-  const o = raw as Record<string, unknown>
-  return { hp: triple(o.hp), lock: lockOf(o.lock), dead: o.dead === true }
+function readSights(raw: unknown, count: number): Sight[] | null {
+  if (!Array.isArray(raw) || raw.length !== count) return null
+  return raw.map((item: Record<string, unknown> | null) => ({ hp: triple(item?.hp), lock: lockOf(item?.lock), dead: item?.dead === true }))
 }
 
-function readEvent(raw: unknown): CombatEvent | null {
+function readEvent(raw: unknown, count: number): CombatEvent | null {
   if (!raw || typeof raw !== 'object') return null
   const o = raw as Record<string, unknown>
-  const side = (x: unknown): 0 | 1 => (x === 1 ? 1 : 0)
+  const ship = (x: unknown) => (Number.isInteger(x) && (x as number) >= 0 && (x as number) < count ? (x as number) : -1)
   const text = (x: unknown) => String(x ?? '').slice(0, 200)
+  const from = ship(o.from)
   switch (o.t) {
     case 'fire': {
       const weapon = o.weapon === 'missile' || o.weapon === 'drone' || o.weapon === 'bomb' ? o.weapon : 'turret'
-      return { t: 'fire', from: side(o.from), weapon, name: text(o.name), quality: num(o.quality), damage: num(o.damage), flight: num(o.flight) }
+      return from < 0 ? null : { t: 'fire', from, to: ship(o.to), weapon, name: text(o.name), quality: num(o.quality), damage: num(o.damage), flight: num(o.flight) }
     }
     case 'impact':
-      return { t: 'impact', from: side(o.from), name: text(o.name), damage: num(o.damage) }
+      return from < 0 || ship(o.to) < 0 ? null : { t: 'impact', from, to: ship(o.to), name: text(o.name), damage: num(o.damage) }
     case 'note':
-      return { t: 'note', to: side(o.to), text: text(o.text) }
+      return { t: 'note', to: ship(o.to), text: text(o.text) }
     case 'dead':
-      return { t: 'dead', who: side(o.who) }
+      return ship(o.who) < 0 ? null : { t: 'dead', who: ship(o.who) }
     default:
       return null
   }
 }
 
 export abstract class Session {
-  world: World = createWorld()
+  world: World
   /** performance.now() when `world` was last brought up to date. */
   worldAt = performance.now()
   started = false
@@ -242,9 +296,12 @@ export abstract class Session {
   rack: ModuleStats[] = []
   /** Whether this pilot's ship carries drones that can fight. */
   hasDrones = false
+  /** How many targets this pilot's ship can lock at once. */
+  maxLocked = 1
   own!: OwnView
-  foe!: FoeView
-  /** Set once a ship has been destroyed. */
+  /** Every ship as this pilot sees it, in ship order (their own included). */
+  sights: Sight[] = []
+  /** Set once one team has no ships left. */
   result: Result | null = null
   /** Things that happened, waiting for the interface to show them. */
   events: CombatEvent[] = []
@@ -254,18 +311,34 @@ export abstract class Session {
 
   constructor(
     readonly me: 0 | 1,
-    readonly players: [Player, Player],
+    readonly players: Player[],
     readonly roomCode: string | null,
-  ) {}
+  ) {
+    this.world = createWorld(
+      15_000,
+      players.map((p) => p.team),
+    )
+  }
 
+  /** The other pilot: the guest for the host, the host for the guest. */
   get them(): 0 | 1 {
     return this.me === 0 ? 1 : 0
+  }
+
+  get myTeam(): number {
+    return this.players[this.me].team
   }
 
   abstract order(order: Order): void
   abstract command(command: Command): void
   abstract setReady(ready: boolean): void
   abstract leave(): void
+
+  protected resultFor(winner: unknown): Result | null {
+    if (winner === 'draw') return 'draw'
+    if (winner !== 0 && winner !== 1) return null
+    return winner === this.myTeam ? 'won' : 'lost'
+  }
 
   protected end(reason: string) {
     if (this.over) return
@@ -280,26 +353,30 @@ export class HostSession extends Session {
   private owed = 0
   private sinceIdleSnap = 0
   private sinceRefresh = 0
-  private sinceBot = 0
-  private loadouts: [Loadout, Loadout]
+  private sinceBots = 0
+  private loadouts: Loadout[]
   private combat: Combat
   private forGuest: CombatEvent[] = []
 
   /**
-   * Pass no channel to fly solo against a scripted opponent. With `sparring`
-   * off, that opponent only flies: a target to measure a fit against.
+   * Pass no channel to fly solo: ship 1 is then a practice target, which only
+   * fights back when `sparring` is on. Extra ships always fight.
    */
   constructor(
-    players: [Player, Player],
+    players: Player[],
     private channel: Channel | null,
     roomCode: string | null,
     dataset: FittingDataset,
     private sparring = true,
   ) {
     super(0, players, roomCode)
-    this.loadouts = [buildLoadout(players[0].fit, dataset, players[0].spec.radius), buildLoadout(players[1].fit, dataset, players[1].spec.radius)]
-    // Both ships start with every module off, as if they had just undocked.
-    this.combat = new Combat([this.statsFor(0, [], []), this.statsFor(1, [], [])])
+    this.loadouts = players.map((p) => buildLoadout(p.fit, dataset, p.spec.radius))
+    // Every ship starts with every module off, as if it had just undocked.
+    this.combat = new Combat(
+      this.loadouts.map((loadout) => computeStats(loadout, [])),
+      Math.random,
+      players.map((p) => p.team),
+    )
     this.syncViews()
     if (channel) {
       this.via = channel.via
@@ -310,7 +387,6 @@ export class HostSession extends Session {
       }
     } else {
       this.ready[1] = true
-      this.world.ships[1].order = { kind: 'orbit', range: this.botRange() }
     }
     this.timer = setInterval(() => this.tick(), 50)
   }
@@ -319,41 +395,50 @@ export class HostSession extends Session {
     return !this.channel
   }
 
-  private statsFor(side: 0 | 1, on: boolean[], hostileOn: boolean[]): ShipStats {
-    const foe = side === 0 ? 1 : 0
-    return computeStats(this.loadouts[side], on, this.loadouts[foe], hostileOn, dist(this.world.ships[0].pos, this.world.ships[1].pos))
-  }
-
   /** Recomputes any ship whose numbers changed, and at intervals any ship under range-dependent effects. */
   private refresh(elapsed: number) {
     const combat = this.combat
-    const running = (side: 0 | 1) => combat.ships[side].modules.map((m) => m.on)
     this.sinceRefresh += elapsed
-    const periodic = this.sinceRefresh >= 1
+    const periodic = this.sinceRefresh >= 1.5
     if (periodic) this.sinceRefresh = 0
-    for (const side of [0, 1] as const) {
-      const foe = side === 0 ? 1 : 0
-      const underEffect = periodic && combat.stats[foe].modules.some((m, i) => m.projects && combat.ships[foe].modules[i].on)
-      if (!combat.dirty[side] && !underEffect) continue
-      combat.dirty[side] = false
-      combat.setStats(side, this.statsFor(side, running(side), running(foe)))
-    }
+    combat.ships.forEach((ship, index) => {
+      if (!combat.dirty[index] && !periodic) return
+      const projections: Projection[] = []
+      combat.ships.forEach((other, o) => {
+        if (o === index || other.dead) return
+        other.modules.forEach((run, i) => {
+          if (run.on && run.target === index && projects(combat.stats[o].modules[i].kind)) {
+            projections.push({ from: this.loadouts[o], module: i, distance: dist(this.world.ships[o].pos, this.world.ships[index].pos) })
+          }
+        })
+      })
+      // The periodic pass is only for effects whose strength changes with range.
+      if (!combat.dirty[index] && !projections.length) return
+      combat.dirty[index] = false
+      combat.setStats(
+        index,
+        computeStats(
+          this.loadouts[index],
+          ship.modules.map((m) => m.on),
+          projections,
+        ),
+      )
+    })
   }
 
   private syncViews() {
     const combat = this.combat
-    for (const side of [0, 1] as const) applyNav(this.players[side].spec, combat.stats[side])
+    combat.stats.forEach((stats, index) => applyNav(this.players[index].spec, stats))
     this.rack = combat.stats[0].modules
     this.hasDrones = combat.stats[0].drones.length > 0
+    this.maxLocked = combat.stats[0].maxLocked
     this.own = ownView(combat, 0)
-    this.foe = foeView(combat, 1)
-    if (combat.winner !== null && !this.result) {
-      this.result = combat.winner === 'draw' ? 'draw' : combat.winner === 0 ? 'won' : 'lost'
-      // Wrecks drift to a halt.
-      combat.ships.forEach((ship, side) => {
-        if (ship.dead) this.world.ships[side].order = { kind: 'stop' }
-      })
-    }
+    this.sights = sights(combat, 0)
+    // Wrecks drift to a halt.
+    combat.ships.forEach((ship, index) => {
+      if (ship.dead && this.world.ships[index].order.kind !== 'stop') this.world.ships[index].order = { kind: 'stop' }
+    })
+    if (combat.winner !== null && !this.result) this.result = this.resultFor(combat.winner)
     for (const event of combat.events.splice(0)) {
       if (event.t !== 'note' || event.to === 0) this.events.push(event)
       if (event.t !== 'note' || event.to === 1) this.forGuest.push(event)
@@ -365,43 +450,15 @@ export class HostSession extends Session {
     const msg = raw as Record<string, unknown> | null
     if (msg?.t === 'ready') this.ready[1] = msg.ready === true
     if (msg?.t === 'order') {
-      const order = parseOrder(msg.order)
+      const order = parseOrder(msg.order, 1, this.players.length)
       if (order && !this.combat.ships[1].dead) this.world.ships[1].order = order
     }
     if (msg?.t === 'cmd' && this.started) {
-      const command = parseCommand(msg.cmd)
+      const command = parseCommand(msg.cmd, this.players.length)
       if (!command) return
       const refusal = this.combat.command(1, command, this.world)
       if (refusal) this.forGuest.push({ t: 'note', to: 1, text: refusal })
     }
-  }
-
-  /** A sensible stand-off for the practice target: inside its weapons' reach. */
-  private botRange(): number {
-    const weapon = this.combat.stats[1].modules.find((m) => m.damage)
-    if (!weapon) return 7_500
-    const reach = weapon.kind === 'missile' ? weapon.range * 0.5 : weapon.range + weapon.falloff * 0.5
-    return Math.round(Math.max(1_000, Math.min(20_000, reach)) / 500) * 500
-  }
-
-  /** The practice target: locks you, then runs its fit the obvious way. */
-  private bot() {
-    const combat = this.combat
-    const ship = combat.ships[1]
-    const stats = combat.stats[1]
-    if (ship.dead || !this.sparring) return
-    if (ship.lock === LOCK_NONE) combat.command(1, { c: 'lock' }, this.world)
-    if (ship.lock !== LOCK_LOCKED) return
-    stats.modules.forEach((m, i) => {
-      const run = ship.modules[i]
-      let want = m.kind !== 'passive' && m.kind !== 'unsupported'
-      if (m.kind === 'armorRep') want = ship.hp[1] < stats.hp[1] * 0.9
-      if (m.kind === 'shieldBoost') want = ship.hp[0] < stats.hp[0] * 0.8
-      if (m.kind === 'hullRep') want = ship.hp[2] < stats.hp[2] * 0.9
-      if (m.kind === 'capBooster') want = ship.cap < stats.capMax * 0.5
-      if (want !== run.wanted) combat.command(1, { c: 'mod', i, on: want }, this.world)
-    })
-    if (stats.drones.length && ship.drones.state === 'bay') combat.command(1, { c: 'drones', on: true }, this.world)
   }
 
   private tick() {
@@ -421,14 +478,19 @@ export class HostSession extends Session {
     this.owed += elapsed
     let stepped = false
     while (this.owed >= STEP_SECONDS) {
-      step(this.world, [this.players[0].spec, this.players[1].spec], STEP_SECONDS)
+      step(
+        this.world,
+        this.players.map((p) => p.spec),
+        STEP_SECONDS,
+      )
       this.combat.tick(this.world, STEP_SECONDS)
-      if (!this.channel) {
-        this.sinceBot += STEP_SECONDS
-        if (this.sinceBot >= 0.5) {
-          this.sinceBot = 0
-          this.bot()
-        }
+      this.sinceBots += STEP_SECONDS
+      if (this.sinceBots >= 0.5) {
+        this.sinceBots = 0
+        this.players.forEach((player, index) => {
+          // The solo practice target can be told to hold fire; extras always fight.
+          if (player.bot) runBot(this.combat, this.world, index, index !== 1 || this.sparring)
+        })
       }
       this.refresh(STEP_SECONDS)
       this.syncViews()
@@ -454,7 +516,7 @@ export class HostSession extends Session {
       order: this.world.ships[1].order,
       nav: this.players.map((p) => [p.spec.maxVelocity, p.spec.mass, p.spec.agility]),
       own: ownView(combat, 1),
-      foe: foeView(combat, 0),
+      sights: sights(combat, 1),
       events: this.forGuest.splice(0),
       winner: combat.winner,
     })
@@ -486,18 +548,21 @@ export class HostSession extends Session {
 }
 
 export class GuestSession extends Session {
-  constructor(players: [Player, Player], private channel: Channel, roomCode: string, dataset: FittingDataset) {
+  constructor(players: Player[], private channel: Channel, roomCode: string, dataset: FittingDataset) {
     super(1, players, roomCode)
     // The host runs the fight; this side only needs to know what its own
-    // modules are, and what its ship looks like before the first snapshot.
-    const mine = buildLoadout(players[1].fit, dataset, players[1].spec.radius)
-    const theirs = buildLoadout(players[0].fit, dataset, players[0].spec.radius)
-    const combat = new Combat([computeStats(theirs, [], mine, [], 15_000), computeStats(mine, [], theirs, [], 15_000)])
+    // modules are, and what the ships look like before the first snapshot.
+    const combat = new Combat(
+      players.map((p) => computeStats(buildLoadout(p.fit, dataset, p.spec.radius), [])),
+      Math.random,
+      players.map((p) => p.team),
+    )
     this.rack = combat.stats[1].modules
     this.hasDrones = combat.stats[1].drones.length > 0
+    this.maxLocked = combat.stats[1].maxLocked
     this.own = ownView(combat, 1)
-    this.foe = foeView(combat, 0)
-    for (const side of [0, 1] as const) applyNav(players[side].spec, combat.stats[side])
+    this.sights = sights(combat, 1)
+    combat.stats.forEach((stats, index) => applyNav(players[index].spec, stats))
     this.via = channel.via
     channel.onMessage = (raw) => this.receive(raw)
     channel.onClose = () => this.end('Your opponent disconnected.')
@@ -505,7 +570,8 @@ export class GuestSession extends Session {
 
   private receive(raw: unknown) {
     const msg = raw as Record<string, unknown> | null
-    if (msg?.t !== 'snap' || !Array.isArray(msg.ships) || msg.ships.length !== 2) return
+    const count = this.players.length
+    if (msg?.t !== 'snap' || !Array.isArray(msg.ships) || msg.ships.length !== count) return
     const ships = msg.ships as Array<{ p?: unknown; v?: unknown }>
     if (!ships.every((s) => isVec3(s?.p) && isVec3(s?.v))) return
     if (typeof msg.time !== 'number' || !Number.isFinite(msg.time)) return
@@ -513,28 +579,26 @@ export class GuestSession extends Session {
       this.world.ships[i].pos = s.p as World['ships'][0]['pos']
       this.world.ships[i].vel = s.v as World['ships'][0]['vel']
     })
-    const order = parseOrder(msg.order)
+    const order = parseOrder(msg.order, 1, count)
     if (order) this.world.ships[1].order = order
     this.world.time = msg.time
     this.started = msg.started === true
     if (Array.isArray(msg.ready)) this.ready = [msg.ready[0] === true, msg.ready[1] === true]
     if (Array.isArray(msg.nav)) {
-      msg.nav.slice(0, 2).forEach((nav, i) => {
+      msg.nav.slice(0, count).forEach((nav, i) => {
         const [maxVelocity, mass, agility] = triple(nav)
         if (maxVelocity >= 0 && mass > 0 && agility > 0) applyNav(this.players[i].spec, { maxVelocity, mass, agility })
       })
     }
-    this.own = readOwnView(msg.own, this.rack.length) ?? this.own
-    this.foe = readFoeView(msg.foe) ?? this.foe
+    this.own = readOwnView(msg.own, this.rack.length, count) ?? this.own
+    this.sights = readSights(msg.sights, count) ?? this.sights
     if (Array.isArray(msg.events)) {
-      for (const item of msg.events.slice(0, 200)) {
-        const event = readEvent(item)
+      for (const item of msg.events.slice(0, 400)) {
+        const event = readEvent(item, count)
         if (event) this.events.push(event)
       }
     }
-    if (!this.result && msg.winner !== null && msg.winner !== undefined) {
-      this.result = msg.winner === 'draw' ? 'draw' : msg.winner === 1 ? 'won' : 'lost'
-    }
+    if (!this.result) this.result = this.resultFor(msg.winner)
     this.worldAt = performance.now()
   }
 

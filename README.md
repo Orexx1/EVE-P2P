@@ -15,14 +15,32 @@ the duel.
 | 3 | Core combat: locking, turrets, missiles, reps, capacitor, reloads, module rack | Done |
 | 4 | Webs, scrams, neuts, nosferatu, ECM, damps, tracking disruptors, painters | Done |
 | 5 | Real ship models in the fight view | Done, with stand-ins as the fallback |
-| 6 | Overheating, drones as targets, scripts, boosters, implants, command bursts | Planned |
+| 6 | Graphics options: presets, resolution, frame rate, anti-aliasing, textures, shaders | Done |
+| 7 | Extra ships on either side, flown by the computer | Done |
+| 8 | Overheating, drones as targets, scripts, boosters, implants, command bursts | Planned |
 
 Fits are computed with every skill at level V. Both ships start with every module
 off, as if they had just undocked.
 
+### Extra ships
+
+Whoever creates the room (or flies solo) can add up to ten more ships under
+"Extra ships" on the fit page: search for a fit or a ship, then tap **+ Ally** or
+**+ Enemy**; each tap adds another copy. Fits come from the one currently loaded,
+the samples, and every fit loaded on that device before. Any ship in the game can
+also be added as an empty hull, which can be shot at but has nothing to shoot
+with. The computer flies the extras: each takes the nearest enemy, orbits inside
+its weapons' reach, locks, and runs its modules. The fight ends when one side
+has no ships left.
+
+In the fight, tap a ship's bracket or its overview row to select it; the
+selected item's buttons then act on it. Locked targets show as cards at the top,
+and the highlighted card is the one modules are pointed at when switched on.
+
 ### What the fight models
 
-- **Locking** by scan resolution and signature radius, lost beyond targeting range.
+- **Locking** by scan resolution and signature radius, lost beyond targeting
+  range, up to the ship's maximum number of locked targets.
 - **Modules** cycle, use capacitor at the start of each cycle, and finish the
   cycle in progress when switched off. Ammunition runs out and reloads.
 - **Turrets**: one roll per shot against tracking and falloff, with the game's

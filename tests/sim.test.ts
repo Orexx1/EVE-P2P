@@ -43,7 +43,7 @@ describe('flight model', () => {
 
   it('closes on a target and settles next to it when approaching', () => {
     const world = createWorld(15_000)
-    world.ships[0].order = { kind: 'approach' }
+    world.ships[0].order = { kind: 'approach', target: 1 }
     run(world, 120)
     expect(dist(world.ships[0].pos, world.ships[1].pos)).toBeLessThan(100)
   })
@@ -51,7 +51,7 @@ describe('flight model', () => {
   it('holds the requested range from either side', () => {
     for (const start of [15_000, 2_000]) {
       const world = createWorld(start)
-      world.ships[0].order = { kind: 'keep', range: 7_500 }
+      world.ships[0].order = { kind: 'keep', target: 1, range: 7_500 }
       run(world, 120)
       expect(dist(world.ships[0].pos, world.ships[1].pos)).toBeCloseTo(7_500, -2)
       expect(len(world.ships[0].vel)).toBeLessThan(5)
@@ -60,7 +60,7 @@ describe('flight model', () => {
 
   it('settles into a fast orbit close to the requested radius', () => {
     const world = createWorld(15_000)
-    world.ships[0].order = { kind: 'orbit', range: 5_000 }
+    world.ships[0].order = { kind: 'orbit', target: 1, range: 5_000 }
     run(world, 180)
     const samples: number[] = []
     for (let i = 0; i < 300; i++) {
@@ -78,8 +78,8 @@ describe('flight model', () => {
 
   it('two ships orbiting each other stay bounded', () => {
     const world = createWorld(10_000)
-    world.ships[0].order = { kind: 'orbit', range: 2_500 }
-    world.ships[1].order = { kind: 'orbit', range: 20_000 }
+    world.ships[0].order = { kind: 'orbit', target: 1, range: 2_500 }
+    world.ships[1].order = { kind: 'orbit', target: 0, range: 20_000 }
     run(world, 300)
     const d = dist(world.ships[0].pos, world.ships[1].pos)
     expect(Number.isFinite(d)).toBe(true)
@@ -91,9 +91,9 @@ describe('flight model', () => {
 describe('orders from the network', () => {
   it('accepts well-formed orders and normalises them', () => {
     expect(parseOrder({ kind: 'stop' })).toEqual({ kind: 'stop' })
-    expect(parseOrder({ kind: 'orbit', range: 5000 })).toEqual({ kind: 'orbit', range: 5000 })
+    expect(parseOrder({ kind: 'orbit', range: 5000 })).toEqual({ kind: 'orbit', target: 0, range: 5000 })
     expect(parseOrder({ kind: 'heading', dir: [0, 0, 4] })).toEqual({ kind: 'heading', dir: [0, 0, 1] })
-    expect(parseOrder({ kind: 'keep', range: 9e9 })).toEqual({ kind: 'keep', range: 250_000 })
+    expect(parseOrder({ kind: 'keep', range: 9e9 })).toEqual({ kind: 'keep', target: 0, range: 250_000 })
   })
 
   it('rejects malformed ones', () => {

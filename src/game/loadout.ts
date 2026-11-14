@@ -116,23 +116,23 @@ export function buildLoadout(loaded: LoadedFit, dataset: FittingDataset, radius:
   return { fit, slots, dataset, radius }
 }
 
-/** The modules of `loadout` that are running and change the numbers of whatever they are pointed at. */
-function projectedFrom(loadout: Loadout, on: boolean[], distance: number): ProjectedSource[] {
-  const sources: ProjectedSource[] = []
-  loadout.fit.modules.forEach((mod, i) => {
-    const kind = loadout.slots[i].kind
-    if (on[i] && (kind === 'web' || kind === 'scram' || kind === 'ewar')) {
-      sources.push({ id: mod.id, typeID: mod.typeID, state: 'ACTIVE', chargeTypeID: mod.chargeTypeID, projectionRange: distance })
-    }
-  })
-  return sources
+/** One running module on another ship that changes this ship's numbers: a web, a scrambler, a dampener. */
+export interface Projection {
+  from: Loadout
+  /** Index of the module in `from`'s fit. */
+  module: number
+  /** Metres between the two ships. */
+  distance: number
 }
+
+/** Whether a module of this kind changes the numbers of the ship it is pointed at. */
+export const projects = (kind: ModuleKind) => kind === 'web' || kind === 'scram' || kind === 'ewar'
 
 /**
  * This ship's numbers right now: with exactly the modules in `on` running,
- * and under whatever the other ship has active on it from `distance` metres.
+ * and under whatever other ships have pointed at it.
  */
-export function computeStats(own: Loadout, on: boolean[], hostile: Loadout, hostileOn: boolean[], distance: number): ShipStats {
+export function computeStats(own: Loadout, on: boolean[], projections: Projection[] = []): ShipStats {
   const { fit, slots, dataset } = own
   fit.modules.forEach((mod, i) => {
     const kind = slots[i].kind
@@ -144,7 +144,10 @@ export function computeStats(own: Loadout, on: boolean[], hostile: Loadout, host
   })
   const computed = computeFit(fit, dataset, {
     skillProfile: allSkillsV(dataset),
-    projected: projectedFrom(hostile, hostileOn, distance),
+    projected: projections.map((p, k): ProjectedSource => {
+      const mod = p.from.fit.modules[p.module]
+      return { id: `${k}:${mod.id}`, typeID: mod.typeID, state: 'ACTIVE', chargeTypeID: mod.chargeTypeID, projectionRange: p.distance }
+    }),
   })
   const d = computed.derived
   const nameOf = (id: number | undefined) => (id === undefined ? '' : (dataset.getType(id)?.name ?? ''))
@@ -285,6 +288,7 @@ export function computeStats(own: Loadout, on: boolean[], hostile: Loadout, host
     capRecharge: d.capacitor.rechargeMs / 1000,
     shieldRecharge: (computed.ship.get(A.shieldRechargeRate)?.final ?? 0) / 1000,
     lockRange: d.targeting.maxTargetingRange,
+    maxLocked: d.targeting.maxLockedTargets,
     scanRes: d.targeting.scanResolution,
     sensorStrength: d.targeting.sensorStrength,
     sensor: SENSOR_INDEX[d.targeting.sensorType] ?? -1,

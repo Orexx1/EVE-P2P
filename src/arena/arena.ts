@@ -1,7 +1,7 @@
 // Mounts the fight view over the page and runs it until someone leaves.
 import './arena.css'
 import type { Session } from '../game/session'
-import { add, scale } from '../sim/vec'
+import { add, scale, type Vec3 } from '../sim/vec'
 import { timeConstant, wantedVelocity, type ShipState } from '../sim/world'
 import { dnaFor } from '../data/models'
 import { FireEffects } from './fx'
@@ -45,16 +45,19 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
   const canvas = root.querySelector<HTMLCanvasElement>('canvas.standin')!
   const surface = root.querySelector<HTMLDivElement>('.surface')!
   const rotate = root.querySelector<HTMLDivElement>('.rotate')!
-  const lengths = session.players.map((p) => p.spec.radius * 2) as [number, number]
-  const rig = new CameraRig(surface, lengths[session.me], session.me)
-  let standin: SpaceView | null = new SpaceView(canvas, lengths, rig)
+  const lengths = session.players.map((p) => p.spec.radius * 2)
+  const teams = session.players.map((p) => p.team)
+  // Engine glow tells the sides apart on the stand-in hulls: yours, your allies', the enemy's.
+  const engines = teams.map((team, i) => (i === session.me ? 0x7fd0ff : team === session.myTeam ? 0x8fe39a : 0xffa45c))
+  const rig = new CameraRig(surface, lengths[session.me], session.me, teams)
+  let standin: SpaceView | null = new SpaceView(canvas, lengths, rig, engines)
   let view: FightView = standin
   let closed = false
 
   // With real models on, the fight waits for them behind a loading notice
   // instead of starting on stand-ins and swapping part-way through.
   const dnas = session.players.map((p) => dnaFor(p.fit.fit.shipTypeID))
-  const wantModels = getGraphics().models && !!dnas[0] && !!dnas[1]
+  const wantModels = getGraphics().models && dnas.every(Boolean)
   let settled = !wantModels
   canvas.hidden = !settled
 
@@ -76,7 +79,7 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
     onExit(reason)
   }
 
-  const fx = new FireEffects(root.querySelector<HTMLCanvasElement>('canvas.fx')!, session.me)
+  const fx = new FireEffects(root.querySelector<HTMLCanvasElement>('canvas.fx')!, session.me, teams)
   const hud = new Hud(session, {
     order: (order) => session.order(order),
     command: (command) => session.command(command),
@@ -116,12 +119,16 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
   })
 
   // Snapshots arrive ten times a second; between them each ship is carried
-  // forward along its own flight model so motion stays smooth.
-  const predicted = (index: 0 | 1, ahead: number): ShipState => {
+  // forward so motion stays smooth: the player's own ship along its flight
+  // model (its order is known here), every other ship along its velocity.
+  const predicted = (index: number, ahead: number): ShipState => {
     const ship = session.world.ships[index]
     if (!session.started || ahead <= 0) return ship
+    if (index !== session.me) {
+      return { order: ship.order, pos: add(ship.pos, scale(ship.vel, ahead)) as Vec3, vel: ship.vel }
+    }
     const spec = session.players[index].spec
-    const wanted = wantedVelocity(ship, session.world.ships[index === 0 ? 1 : 0], spec)
+    const wanted = wantedVelocity(ship, session.world.ships, spec)
     const tau = timeConstant(spec)
     const decay = Math.exp(-ahead / tau)
     const gap = add(ship.vel, scale(wanted, -1))
@@ -135,27 +142,30 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
   let frame = 0
   let lastFrame = performance.now()
   /** When each ship blew up, so the hull can vanish inside the fireball. */
-  const diedAt: [number, number] = [0, 0]
+  const diedAt = session.players.map(() => 0)
   const draw = (now: number) => {
     frame = requestAnimationFrame(draw)
     const dt = Math.min((now - lastFrame) / 1000, 0.1)
     lastFrame = now
     if (!rotate.hidden) return
     const ahead = Math.min((now - session.worldAt) / 1000, 0.5)
-    const ships: [ShipState, ShipState] = [predicted(0, ahead), predicted(1, ahead)]
+    const ships = session.players.map((_, i) => predicted(i, ahead))
     const events = session.events.splice(0)
     for (const event of events) if (event.t === 'dead') diedAt[event.who] = now
-    const alive = (index: 0 | 1) => !diedAt[index] || now - diedAt[index] < 250
-    const views: [ShipView, ShipView] = [
-      { ...ships[0], thrust: alive(0) ? thrust(ships[0], session.players[0].spec.maxVelocity) : 0, alive: alive(0) },
-      { ...ships[1], thrust: alive(1) ? thrust(ships[1], session.players[1].spec.maxVelocity) : 0, alive: alive(1) },
-    ]
+    const views: ShipView[] = ships.map((ship, i) => {
+      // A destroyed ship stays for a moment so it vanishes inside its fireball.
+      const alive = !diedAt[i] || now - diedAt[i] < 250
+      return { ...ship, thrust: alive ? thrust(ship, session.players[i].spec.maxVelocity) : 0, alive }
+    })
     rig.update(views)
     view.render(views)
     fx.add(events)
-    fx.draw([rig.project(0), rig.project(1)], dt)
+    fx.draw(
+      ships.map((_, i) => rig.project(i)),
+      dt,
+    )
     hud.report(events)
-    hud.update(ships, rig.project(session.them), now)
+    hud.update(ships, (i) => rig.project(i), now)
   }
   frame = requestAnimationFrame(draw)
 
@@ -178,7 +188,7 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
     report.models = 'loading'
     hud.setLoading(0)
     void import('./modelView')
-      .then(({ ModelView }) => ModelView.load(dnas as [string, string], rig, (percent) => hud.setLoading(percent)))
+      .then(({ ModelView }) => ModelView.load(dnas as string[], rig, (percent) => hud.setLoading(percent)))
       .then((models) => {
         if (closed) return
         const backToStandins = (remember: boolean) => {
@@ -186,7 +196,7 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
           if (remember) setGraphics({ models: false })
           models.dispose()
           canvas.hidden = false
-          view = standin = new SpaceView(canvas, lengths, rig)
+          view = standin = new SpaceView(canvas, lengths, rig, engines)
           layout()
           report.models = 'too slow'
         }

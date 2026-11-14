@@ -8,7 +8,11 @@ type Point = { x: number; y: number } | null
 
 interface Effect {
   kind: 'tracer' | 'missile' | 'ring' | 'blast'
-  from: 0 | 1
+  /** The ship it starts at and the ship it ends at (the same ship for rings and blasts). */
+  from: number
+  to: number
+  /** Whose shot it is, for the colour. */
+  by: number
   /** Seconds since it began, and how long it lasts. */
   age: number
   life: number
@@ -17,6 +21,7 @@ interface Effect {
 }
 
 const MINE = '#9fe0ff'
+const ALLIES = '#a6e8b0'
 const THEIRS = '#ffb070'
 
 export class FireEffects {
@@ -27,7 +32,8 @@ export class FireEffects {
 
   constructor(
     private canvas: HTMLCanvasElement,
-    private me: 0 | 1,
+    private me: number,
+    private teams: number[],
   ) {
     this.ctx = canvas.getContext('2d')!
   }
@@ -42,30 +48,35 @@ export class FireEffects {
   }
 
   add(events: CombatEvent[]) {
+    const push = (kind: Effect['kind'], from: number, to: number, by: number, life: number, amount: number) =>
+      this.effects.push({ kind, from, to, by, age: 0, life, amount })
     for (const event of events) {
       if (event.t === 'fire') {
         const hit = event.quality !== 0
-        if (event.weapon === 'missile') {
-          this.effects.push({ kind: 'missile', from: event.from, age: 0, life: Math.max(event.flight, 0.2), amount: 0 })
-        } else if (event.weapon === 'bomb') {
-          this.effects.push({ kind: 'ring', from: event.from === 0 ? 1 : 0, age: 0, life: 0.5, amount: 60 })
+        if (event.weapon === 'bomb') {
+          // A burst around the ship that set it off.
+          push('ring', event.from, event.from, event.from, 0.5, 60)
+        } else if (event.to < 0) {
+          continue
+        } else if (event.weapon === 'missile') {
+          push('missile', event.from, event.to, event.from, Math.max(event.flight, 0.2), 0)
         } else {
           const miss = hit ? 0 : (Math.random() < 0.5 ? -1 : 1) * (14 + Math.random() * 22)
-          this.effects.push({ kind: 'tracer', from: event.from, age: 0, life: event.weapon === 'drone' ? 0.12 : 0.2, amount: miss })
-          if (hit) this.effects.push({ kind: 'ring', from: event.from, age: 0, life: 0.28, amount: event.quality >= 5 ? 16 : 9 })
+          push('tracer', event.from, event.to, event.from, event.weapon === 'drone' ? 0.12 : 0.2, miss)
+          if (hit) push('ring', event.to, event.to, event.from, 0.28, event.quality >= 5 ? 16 : 9)
         }
       } else if (event.t === 'impact') {
-        this.effects.push({ kind: 'ring', from: event.from, age: 0, life: 0.4, amount: 18 })
+        push('ring', event.to, event.to, event.from, 0.4, 18)
       } else if (event.t === 'dead') {
-        this.effects.push({ kind: 'blast', from: event.who === 0 ? 1 : 0, age: 0, life: 1.8, amount: 0 })
+        push('blast', event.who, event.who, event.who, 1.8, 0)
       }
     }
     // A long fight between rapid-fire ships must not pile these up.
-    if (this.effects.length > 200) this.effects.splice(0, this.effects.length - 200)
+    if (this.effects.length > 300) this.effects.splice(0, this.effects.length - 300)
   }
 
   /** Draws one frame. `at` is where each ship is on screen, or null when it is out of view. */
-  draw(at: [Point, Point], dt: number) {
+  draw(at: Point[], dt: number) {
     const ctx = this.ctx
     ctx.clearRect(0, 0, this.width, this.height)
     if (!this.effects.length) return
@@ -74,10 +85,10 @@ export class FireEffects {
       effect.age += dt
       if (effect.age >= effect.life) return false
       const source = at[effect.from]
-      const target = at[effect.from === 0 ? 1 : 0]
+      const target = at[effect.to]
       if (!target) return true
       const t = effect.age / effect.life
-      const color = effect.from === this.me ? MINE : THEIRS
+      const color = effect.by === this.me ? MINE : this.teams[effect.by] === this.teams[this.me] ? ALLIES : THEIRS
 
       if (effect.kind === 'tracer' && source) {
         const dx = target.x - source.x

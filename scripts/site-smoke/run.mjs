@@ -3,7 +3,7 @@
 // a sample fit in headless Chrome, waits for the real hulls to take over from
 // the stand-ins, and saves a screenshot.
 //
-//   node run.mjs <dist dir> <output dir>      FIT=<sample index, default 0>  GFX=<graphics options as JSON>
+//   node run.mjs <dist dir> <output dir>      FIT=<sample index, default 0>  GFX=<graphics options as JSON>  EXTRAS=<ships to add>
 import { createReadStream, existsSync, statSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import http from 'node:http'
@@ -69,6 +69,19 @@ try {
   await page.waitForSelector('.duel:not([hidden]) [data-act="solo"]', { timeout: 20_000 })
   // A target that does not shoot back, so the ship is still there for the pictures.
   await page.click('#spar')
+  // EXTRAS="merlin:0,caracal:1" adds ships through the picker: search text, then 0 for an ally or 1 for an enemy.
+  const extras = (process.env.EXTRAS ?? 'merlin:0,caracal:1').split(',').filter(Boolean)
+  if (extras.length) {
+    await page.click('.roster summary')
+    for (const extra of extras) {
+      const [query, team] = extra.split(':')
+      await page.$eval('#shipSearch', (e) => (e.value = ''))
+      await page.type('#shipSearch', query)
+      await sleep(200)
+      await page.click(`.roster-results li:nth-child(1) [data-team="${team === '0' ? 0 : 1}"]`)
+    }
+    note(`extra ships: allies [${await page.$eval('[data-el="team0"]', (e) => e.textContent.trim().replace(/\s+/g, ' '))}] enemies [${await page.$eval('[data-el="team1"]', (e) => e.textContent.trim().replace(/\s+/g, ' '))}]`)
+  }
   await page.click('[data-act="solo"]')
   await page.waitForSelector('.arena .hud', { timeout: 30_000 })
   const opened = Date.now()
@@ -103,6 +116,7 @@ try {
   // Let textures still streaming in land, and the fight develop.
   await sleep(state === 'ready' ? 8_000 : 2000)
   await shoot('fight')
+  note(`overview: ${await page.evaluate(() => [...document.querySelectorAll('.overview tbody tr')].map((e) => e.className.split(' ')[0] + ' ' + e.textContent.trim().replace(/\s+/g, ' ')).join(' | '))}`)
   note(`hud: ${await page.evaluate(() => [document.querySelector('[data-el="layers"]')?.textContent, document.querySelector('[data-el="selRange"]')?.textContent, ...[...document.querySelectorAll('.combat-log li')].map((l) => l.textContent)].join(' | '))}`)
   if (state === 'ready') {
     // Zoom out with the mouse wheel to see both ships and the backdrop.

@@ -60,17 +60,19 @@ function makeStars(): THREE.Points {
 export class SpaceView implements FightView {
   private renderer: THREE.WebGLRenderer
   private scene = new THREE.Scene()
-  private hulls: [THREE.Group, THREE.Group]
+  private hulls: THREE.Group[]
   private dust: THREE.Points
   private dustBase: Float32Array
   private dustBox: number
   private stopWatching: () => void
   private lastDrawn = 0
 
+  /** `engines[i]` is the colour of ship i's engine glow, which is how the sides are told apart. */
   constructor(
     canvas: HTMLCanvasElement,
-    lengths: [number, number],
+    lengths: number[],
     private rig: CameraRig,
+    engines: number[],
   ) {
     const me = rig.me
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: getGraphics().antialias, logarithmicDepthBuffer: true })
@@ -86,7 +88,7 @@ export class SpaceView implements FightView {
     sun.position.set(0.7, 0.45, 0.5)
     this.scene.add(sun, new THREE.AmbientLight(0x6f86a8, 0.9))
 
-    this.hulls = [makeHull(lengths[0], me === 0 ? 0x7fd0ff : 0xffa45c), makeHull(lengths[1], me === 1 ? 0x7fd0ff : 0xffa45c)]
+    this.hulls = lengths.map((length, i) => makeHull(length, engines[i]))
     this.scene.add(...this.hulls)
 
     // Drifting dust around the ship: the only thing that makes speed visible
@@ -109,7 +111,7 @@ export class SpaceView implements FightView {
     this.renderer.setSize(width, height, false)
   }
 
-  render(ships: [ShipView, ShipView]) {
+  render(ships: ShipView[]) {
     const fps = getGraphics().fps
     const now = performance.now()
     if (fps && now - this.lastDrawn < 1000 / fps - 4) return

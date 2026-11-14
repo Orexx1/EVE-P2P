@@ -219,26 +219,26 @@ async function boot(): Promise<Stage> {
 export class ModelView implements FightView {
   /** Called if the device cannot keep a usable frame rate with real models. */
   onSlow: (() => void) | null = null
-  private latest: [ShipView, ShipView] | null = null
+  private latest: ShipView[] | null = null
   private slowFor = 0
   private shown = 0
   private owed = 0
 
   private constructor(
     private stage: Stage,
-    private hulls: [any, any],
-    private dnas: [string, string],
+    private hulls: any[],
+    private dnas: string[],
     readonly rig: CameraRig,
   ) {}
 
-  /** Gets both hulls, from the ones already warmed if possible. Rejects if either cannot be loaded. */
-  static async load(dnas: [string, string], rig: CameraRig, onProgress: (percent: number) => void): Promise<ModelView> {
+  /** Gets every hull, from the ones already warmed if possible. Rejects if any cannot be loaded. */
+  static async load(dnas: string[], rig: CameraRig, onProgress: (percent: number) => void): Promise<ModelView> {
     const pending = dnas.map(take)
-    const report = () => onProgress(Math.round((pending[0].percent + pending[1].percent) / 2))
+    const report = () => onProgress(Math.round(pending.reduce((sum, p) => sum + p.percent, 0) / pending.length))
     pending.forEach((p) => p.listeners.add(report))
     report()
     try {
-      const hulls = (await Promise.all(pending.map((p) => p.hull))) as [any, any]
+      const hulls = await Promise.all(pending.map((p) => p.hull))
       return new ModelView(await getStage(), hulls, dnas, rig)
     } finally {
       pending.forEach((p) => p.listeners.delete(report))
@@ -260,7 +260,7 @@ export class ModelView implements FightView {
     s.active = this
   }
 
-  render(ships: [ShipView, ShipView]) {
+  render(ships: ShipView[]) {
     this.latest = ships
   }
 
@@ -310,7 +310,7 @@ export class ModelView implements FightView {
       // Kept for the next fight with the same ship, so a rematch starts at once.
       const list = pool.get(this.dnas[i]) ?? []
       pool.set(this.dnas[i], list)
-      if (list.length < 2) {
+      if (list.length < 4) {
         hull.display = true
         list.push({ percent: 100, listeners: new Set(), hull: Promise.resolve(hull) })
       }

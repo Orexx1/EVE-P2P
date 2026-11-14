@@ -1,4 +1,4 @@
-// The camera and the per-frame pose of both ships, shared by whichever view is
+// The camera and the per-frame pose of every ship, shared by whichever view is
 // drawing the fight (stand-in hulls or real models). Everything is expressed
 // relative to the player's own ship, which sits at the origin: that keeps
 // coordinates small (no jitter at 100 km) and lets the camera orbit the origin.
@@ -17,7 +17,7 @@ export interface ShipView {
 
 /** What the arena needs from a view, whichever renderer is behind it. */
 export interface FightView {
-  render(ships: [ShipView, ShipView]): void
+  render(ships: ShipView[]): void
   resize(width: number, height: number): void
   dispose(): void
 }
@@ -28,22 +28,23 @@ export const FIELD_OF_VIEW = 55
 export class CameraRig {
   readonly camera = new THREE.PerspectiveCamera(FIELD_OF_VIEW, 1, 1, 1e7)
   /** Each ship's position relative to the player's ship. */
-  readonly offsets: [THREE.Vector3, THREE.Vector3] = [new THREE.Vector3(), new THREE.Vector3()]
+  readonly offsets: THREE.Vector3[]
   /** Each ship's orientation: nose along its velocity. */
-  readonly turns: [THREE.Quaternion, THREE.Quaternion] = [
-    new THREE.Quaternion(),
-    new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI),
-  ]
+  readonly turns: THREE.Quaternion[]
   origin: Vec3 = [0, 0, 0]
   private controls: OrbitControls
   private scratch = new THREE.Vector3()
   private turn = new THREE.Quaternion()
 
+  /** `teams[i]` is the side ship i is on; the two teams start facing each other. */
   constructor(
     private surface: HTMLElement,
     ownLength: number,
-    readonly me: 0 | 1,
+    readonly me: number,
+    teams: number[],
   ) {
+    this.offsets = teams.map(() => new THREE.Vector3())
+    this.turns = teams.map((team) => new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), team === 0 ? 0 : Math.PI))
     this.camera.position.set(ownLength * 1.9, ownLength * 1.2, -ownLength * 2.6)
     this.controls = new OrbitControls(this.camera, surface)
     this.controls.enablePan = false
@@ -72,7 +73,7 @@ export class CameraRig {
   }
 
   /** Brings poses and the camera up to date. Call once per frame, before drawing. */
-  update(ships: [ShipView, ShipView]) {
+  update(ships: ShipView[]) {
     const origin = (this.origin = ships[this.me].pos)
     ships.forEach((ship, i) => {
       this.offsets[i].set(ship.pos[0] - origin[0], ship.pos[1] - origin[1], ship.pos[2] - origin[2])
@@ -88,7 +89,7 @@ export class CameraRig {
   }
 
   /** Where a ship sits on screen, in CSS pixels, or null if it is behind the camera. */
-  project(index: 0 | 1): { x: number; y: number } | null {
+  project(index: number): { x: number; y: number } | null {
     this.scratch.copy(this.offsets[index]).project(this.camera)
     if (this.scratch.z > 1) return null
     return {

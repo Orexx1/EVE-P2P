@@ -172,6 +172,15 @@ html.in-arena {
   transform: rotate(45deg);
 }
 
+.bracket.ally .bracket-mark {
+  border-color: #8fd0ff;
+}
+
+.bracket.selected .bracket-mark {
+  outline: 1px solid var(--text);
+  outline-offset: 3px;
+}
+
 .bracket.locking .bracket-mark {
   border-color: var(--warn);
   animation: pulse 0.6s steps(2) infinite;
@@ -262,6 +271,32 @@ html.in-arena {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 5rem;
+}
+
+.overview {
+  max-height: 8.5rem;
+  overflow-y: auto;
+}
+
+.overview tbody tr {
+  cursor: pointer;
+}
+
+.overview tr.enemy td:first-child {
+  color: #ff9c86;
+}
+
+.overview tr.ally td:first-child {
+  color: #8fd0ff;
+}
+
+.overview tr.selected td {
+  background: rgb(230 235 239 / 0.12);
+}
+
+.overview tr.dead td {
+  color: var(--muted);
+  text-decoration: line-through;
 }
 
 .overview .num {
@@ -513,30 +548,59 @@ html.in-arena {
   border-color: #7fe08a;
 }
 
-/* The locked target, top centre: shield, armor and hull, as on a target in game. */
-.target {
+/* Locked targets, top centre: a card each with shield, armor and hull. The
+   highlighted card is the one modules are pointed at. */
+.targets {
   position: absolute;
   top: max(0.5rem, env(safe-area-inset-top));
-  left: 50%;
+  left: calc((100% - 13.5rem) / 2 + 6rem);
   transform: translateX(-50%);
-  width: 11rem;
-  padding: 0.3125rem 0.5rem 0.375rem;
-  background: rgb(20 29 39 / 0.82);
-  border: 1px solid #ff5a4d;
-  border-radius: 4px;
+  display: flex;
+  gap: 0.25rem;
+  max-width: calc(100% - 31rem);
   pointer-events: none;
 }
 
-.target h2 {
+.arena .target {
+  flex: 0 1 8.5rem;
+  min-width: 4.5rem;
+  min-height: 0;
+  display: grid;
+  gap: 2px;
+  padding: 0.25rem 0.4375rem 0.3125rem;
+  text-align: left;
+  background: rgb(20 29 39 / 0.82);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  opacity: 0.8;
+  pointer-events: auto;
+}
+
+.arena .target.active {
+  border-color: #ff5a4d;
+  opacity: 1;
+}
+
+.arena .target.ally.active {
+  border-color: #8fd0ff;
+}
+
+.target-name {
+  font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+.target .sub {
+  font-size: 0.6875rem;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
 .bars {
   display: grid;
   gap: 2px;
-  margin-top: 0.25rem;
 }
 
 .bar {
@@ -544,6 +608,10 @@ html.in-arena {
   background: var(--line);
   border-radius: 2px;
   overflow: hidden;
+}
+
+.bar {
+  display: block;
 }
 
 .bar span {
