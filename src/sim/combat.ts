@@ -471,7 +471,8 @@ export class Combat {
 
     this.missiles = this.missiles.filter((missile) => {
       if (missile.at > this.time) return true
-      if (!missile.reaches || this.ships[missile.to].dead) return false
+      // A volley that arrives after the killing blow has nothing left to hit.
+      if (!missile.reaches || this.ships[missile.to].hp[2] <= 0) return false
       const factor = missileFactor(this.stats[missile.to].signature, len(world.ships[missile.to].vel), missile)
       const damage = this.damage(missile.to, times(missile.damage, factor), missile.from)
       this.events.push({ t: 'impact', from: missile.from, to: missile.to, name: missile.name, damage })
