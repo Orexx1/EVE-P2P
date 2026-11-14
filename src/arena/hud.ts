@@ -238,6 +238,8 @@ export class Hud {
   private shotBy: number[] = []
   private clock = 0
   private stopKeys: (() => void) | null = null
+  /** Whether the pilot picked the selected item themselves, as opposed to it being picked for them. */
+  private chosenByPilot = false
   private abilities: HTMLButtonElement[][] = []
   private handlers: HudHandlers
   private targetsKey = ''
@@ -444,6 +446,7 @@ export class Hud {
       // A locked target's card: point modules at it, and select it.
       const card = target.closest<HTMLElement>('[data-target]')?.dataset.target
       if (card !== undefined) {
+        this.chosenByPilot = true
         this.selected = Number(card)
         handlers.command({ c: 'target', t: Number(card) })
         return
@@ -454,6 +457,7 @@ export class Hud {
       if (shipEl) {
         const index = Number(shipEl.dataset.ship)
         const again = index === this.selected && shipEl.hasAttribute('data-bracket')
+        this.chosenByPilot = true
         this.selected = index
         if (again && lockState(session.own, index) === LOCK_NONE) handlers.command({ c: 'lock', t: index })
         this.lastText = 0
@@ -772,10 +776,14 @@ export class Hud {
   private reselect(ships: ShipState[]) {
     const s = this.session
     const alive = (i: number) => i !== s.me && !s.sights[i]?.dead
-    if (alive(this.selected)) return
     const mine = ships[s.me].pos
     const candidates = s.players.map((_, i) => i).filter(alive)
     const enemies = candidates.filter((i) => s.players[i].team !== s.myTeam)
+    // What the pilot chose stays chosen. A friend selected only because there was nobody else
+    // gives way to an enemy as soon as one is there, so the next lock is not on the friend.
+    const fallback = !this.chosenByPilot && s.entities[this.selected]?.team === s.myTeam && enemies.length > 0
+    if (alive(this.selected) && !fallback) return
+    this.chosenByPilot = false
     const pool = enemies.length ? enemies : candidates
     if (pool.length) this.selected = pool.reduce((best, i) => (dist(mine, ships[i].pos) < dist(mine, ships[best].pos) ? i : best))
   }
