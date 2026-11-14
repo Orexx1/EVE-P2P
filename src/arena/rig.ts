@@ -34,6 +34,8 @@ export class CameraRig {
   origin: Vec3 = [0, 0, 0]
   private controls: OrbitControls
   private scratch = new THREE.Vector3()
+  private spanA = new THREE.Vector3()
+  private spanB = new THREE.Vector3()
   private turn = new THREE.Quaternion()
 
   /** `teams[i]` is the side ship i is on; the two teams start facing each other. */
@@ -106,6 +108,31 @@ export class CameraRig {
       x: ((this.scratch.x + 1) / 2) * this.surface.clientWidth,
       y: ((1 - this.scratch.y) / 2) * this.surface.clientHeight,
     }
+  }
+
+  /**
+   * Where the line between two points in space runs on screen. An end that is
+   * behind the camera is cut off where the line leaves the view, and reported
+   * as not `seen`, so a beam to something behind the player still heads off the
+   * right way. Null when the whole line is behind the camera.
+   */
+  span(from: Vec3, to: Vec3): { a: { x: number; y: number }; b: { x: number; y: number }; aSeen: boolean; bSeen: boolean } | null {
+    const view = (p: Vec3, out: THREE.Vector3) =>
+      out.set(p[0] - this.origin[0], p[1] - this.origin[1], p[2] - this.origin[2]).applyMatrix4(this.camera.matrixWorldInverse)
+    const a = view(from, this.spanA)
+    const b = view(to, this.spanB)
+    // In the camera's own space it looks down -z; anything nearer than this counts as behind it.
+    const near = -Math.max(this.camera.near, 1)
+    const aSeen = a.z < near
+    const bSeen = b.z < near
+    if (!aSeen && !bSeen) return null
+    if (!aSeen) a.lerp(b, (near - a.z) / (b.z - a.z))
+    if (!bSeen) b.lerp(a, (near - b.z) / (a.z - b.z))
+    const screen = (p: THREE.Vector3) => {
+      p.applyMatrix4(this.camera.projectionMatrix)
+      return { x: ((p.x + 1) / 2) * this.surface.clientWidth, y: ((1 - p.y) / 2) * this.surface.clientHeight }
+    }
+    return { a: screen(a), b: screen(b), aSeen, bSeen }
   }
 
   /** The direction in space under a point on screen: where a double-tap sends the ship. */

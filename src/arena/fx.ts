@@ -59,6 +59,14 @@ const scatter = (n: number) => {
 }
 
 /** A drone or squadron to mark on screen this frame. */
+/** Where a link between two things runs on screen, and whether each end is really in view. */
+export interface Span {
+  a: { x: number; y: number }
+  b: { x: number; y: number }
+  aSeen: boolean
+  bSeen: boolean
+}
+
 export interface CraftMark {
   x: number
   y: number
@@ -130,7 +138,7 @@ export class FireEffects {
   }
 
   /** Running modules, drawn between the ships they join or around the ship they act on. */
-  private drawLinks(at: Point[], links: Link[]) {
+  private drawLinks(at: Point[], links: Link[], spans: Array<Span | null>) {
     if (!links.length) return
     const ctx = this.ctx
     const t = this.clock
@@ -140,26 +148,33 @@ export class FireEffects {
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
     links.slice(0, 80).forEach(([from, to, kind], n) => {
-      const a = at[from]
-      const b = at[to]
-      if (!a || !b) return
+      // Something a ship does to itself is drawn where the ship is; a beam runs wherever the line between the two shows.
+      const span = from === to ? null : spans[n]
+      const a = span ? span.a : at[from]
+      const real = span ? span.b : at[to]
+      if (!a || !real || (from !== to && !span)) return
+      // The mark an effect puts on its target is only drawn when the target itself is in view.
+      const b = span && !span.bSeen ? { x: -9999, y: -9999 } : real
       const colour = LINK_COLOUR[kind]
       ctx.strokeStyle = colour
       ctx.fillStyle = colour
       ctx.setLineDash([])
-      const dx = b.x - a.x
-      const dy = b.y - a.y
-      const length = Math.hypot(dx, dy)
+      // A line cut off at the edge of the view can run a very long way off screen; there is no need to draw all of it.
+      const reach = Math.hypot(real.x - a.x, real.y - a.y)
+      const keep = reach > 1400 ? 1400 / reach : 1
+      const dx = (real.x - a.x) * keep
+      const dy = (real.y - a.y) * keep
+      const length = reach * keep
       const ux = length ? dx / length : 1
       const uy = length ? dy / length : 0
       // A point `s` of the way along, pushed `off` pixels to one side.
       const along = (s: number, off = 0) => [a.x + dx * s - uy * off, a.y + dy * s + ux * off] as const
-      const path = (offset: (s: number, i: number) => number, steps = Math.max(8, Math.min(60, Math.round(length / 7)))) => {
+      const path = (offset: (s: number, i: number) => number, steps = Math.max(8, Math.min(280, Math.round(length / 5)))) => {
         ctx.beginPath()
         for (let i = 0; i <= steps; i++) {
           const s = i / steps
-          // Tapered, so every strand leaves the hull and arrives on the target.
-          const [x, y] = along(s, offset(s, i) * Math.sin(Math.PI * s))
+          // Tapered over the first and last stretch, so every strand leaves the hull and arrives on the target.
+          const [x, y] = along(s, offset(s, i) * Math.min(1, (s * length) / 36, ((1 - s) * length) / 36))
           if (i) ctx.lineTo(x, y)
           else ctx.moveTo(x, y)
         }
@@ -196,7 +211,7 @@ export class FireEffects {
           // A tight double coil, and a cross held on the target's drive.
           ctx.lineWidth = 1.2
           ctx.globalAlpha = 0.8
-          if (beam) for (let k = 0; k < 2; k++) path((s) => 2.5 * Math.sin((s * length) / 2.4 - t * 10 + k * Math.PI))
+          if (beam) for (let k = 0; k < 2; k++) path((s) => 2.5 * Math.sin((s * length) / 3.2 - t * 10 + k * Math.PI))
           const size = 5 + 1.5 * Math.sin(t * 8)
           ctx.lineWidth = 1.6
           ctx.beginPath()
@@ -343,11 +358,11 @@ export class FireEffects {
   }
 
   /** Draws one frame. `at` is where each ship, drone and squadron is on screen, or null when it is out of view or not in space. */
-  draw(at: Point[], dt: number, craft: CraftMark[] = [], links: Link[] = []) {
+  draw(at: Point[], dt: number, craft: CraftMark[] = [], links: Link[] = [], spans: Array<Span | null> = []) {
     const ctx = this.ctx
     this.clock += dt
     ctx.clearRect(0, 0, this.width, this.height)
-    this.drawLinks(at, links)
+    this.drawLinks(at, links, spans)
     // Drones are darts and squadrons are wider wedges, in their side's colour; one that is attacking is filled in.
     ctx.lineWidth = 1.25
     ctx.lineJoin = 'round'

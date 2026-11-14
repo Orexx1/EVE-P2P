@@ -192,7 +192,13 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
     })
     report.craft = marks.length
     fx.add(events)
-    fx.draw(at, dt, marks, session.links)
+    fx.draw(
+      at,
+      dt,
+      marks,
+      session.links,
+      session.links.map(([from, to]) => (from === to || !all[from] || !all[to] ? null : rig.span(all[from].pos, all[to].pos))),
+    )
     hud.report(events)
     hud.update(all, (i) => at[i], now)
   }
