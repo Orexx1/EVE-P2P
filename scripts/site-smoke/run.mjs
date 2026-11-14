@@ -66,26 +66,31 @@ try {
   await page.click('#spar')
   await page.click('[data-act="solo"]')
   await page.waitForSelector('.arena .hud', { timeout: 30_000 })
-  await sleep(1500)
-  // Get moving and lock up, so the pictures show a fight and not just a ship.
-  await page.select('.arena [data-el="orbitRange"]', '1000')
-  await page.click('.arena [data-act="orbit"]')
-  await page.click('.arena [data-el="lock"]')
-  await shoot('standin')
+  const opened = Date.now()
+  await shoot('loading')
 
+  // The fight holds on a loading notice until the real hulls are in.
   const deadline = Date.now() + 240_000
   let last = ''
   while (Date.now() < deadline) {
     const arena = await page.evaluate(() => window.__arena ?? {})
     state = String(arena.models)
-    const loading = await page.evaluate(() => document.querySelector('[data-el="loading"]')?.textContent ?? '')
-    if (loading !== last) note(`hud: ${(last = loading)}`)
+    const notice = await page.evaluate(() => document.querySelector('[data-el="notice"]')?.textContent ?? '')
+    if (notice !== last) note(`notice: ${(last = notice)}`)
     if (state !== 'loading') {
       if (arena.error) note(`models error: ${arena.error}`)
+      note(`timings (ms): ${JSON.stringify(arena.timings ?? {})}`)
       break
     }
-    await sleep(2000)
+    await sleep(1000)
   }
+  note(`fight view settled ${((Date.now() - opened) / 1000).toFixed(1)} s after the fight opened`)
+  await page.waitForFunction(() => document.querySelector('[data-el="clock"]')?.textContent, { timeout: 60_000 })
+  // Get moving and lock up, so the pictures show a fight and not just a ship.
+  await page.select('.arena [data-el="orbitRange"]', '1000')
+  await page.click('.arena [data-act="orbit"]')
+  await page.click('.arena [data-el="lock"]')
+  await sleep(4000)
   note(`models: ${state}`)
   for (const mod of await page.$$eval('.arena .mod:not(:disabled)', (els) => els.map((e) => e.dataset.mod))) {
     await page.click(`.arena [data-mod="${mod}"]`)

@@ -3,13 +3,15 @@ import './arena.css'
 import type { Session } from '../game/session'
 import { add, scale } from '../sim/vec'
 import { timeConstant, wantedVelocity, type ShipState } from '../sim/world'
-import shipModels from '../data/shipModels.json'
+import { dnaFor } from '../data/models'
 import { FireEffects } from './fx'
 import { Hud } from './hud'
 import { CameraRig, type FightView, type ShipView } from './rig'
 import { SpaceView } from './scene'
 
 const MODELS_KEY = 'eve-p2p:real-models'
+/** How long a fight waits for real models before starting on stand-ins. */
+const MODEL_WAIT_MS = 45_000
 
 /** Real ship models are on unless this device has turned them off (by choice or because they ran too slowly). */
 export function realModelsEnabled(): boolean {
@@ -67,12 +69,20 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
   let view: FightView = standin
   let closed = false
 
+  // With real models on, the fight waits for them behind a loading notice
+  // instead of starting on stand-ins and swapping part-way through.
+  const dnas = session.players.map((p) => dnaFor(p.fit.fit.shipTypeID))
+  const wantModels = realModelsEnabled() && !!dnas[0] && !!dnas[1]
+  let settled = !wantModels
+  canvas.hidden = !settled
+
   const exit = (reason: string | null) => {
     if (closed) return
     closed = true
     cancelAnimationFrame(frame)
     window.removeEventListener('resize', layout)
     portrait.removeEventListener('change', layout)
+    clearTimeout(modelWait)
     session.leave()
     view.dispose()
     standin?.dispose()
@@ -98,7 +108,7 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
     const blocked = phoneInPortrait()
     rotate.hidden = !blocked
     hud.root.hidden = blocked
-    session.setReady(!blocked)
+    session.setReady(!blocked && settled)
     rig.resize(root.clientWidth, root.clientHeight)
     view.resize(root.clientWidth, root.clientHeight)
     fx.resize(root.clientWidth, root.clientHeight)
@@ -166,16 +176,27 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
   }
   frame = requestAnimationFrame(draw)
 
-  // Real hulls load in the background and take over from the stand-ins when
-  // both are ready. Any failure leaves the stand-ins in place.
-  const dnas = session.players.map((p) => (shipModels as Record<string, string>)[String(p.fit.fit.shipTypeID)])
+  /** The view is decided (real models or stand-ins): the fight may start. */
+  const settle = () => {
+    if (settled || closed) return
+    settled = true
+    clearTimeout(modelWait)
+    hud.setLoading(null)
+    layout()
+  }
+  const modelWait = setTimeout(() => {
+    // Taking too long: start on stand-ins. The real hulls still take over if they arrive.
+    if (view === standin) canvas.hidden = false
+    settle()
+  }, MODEL_WAIT_MS)
+
   report.models = 'off'
-  if (realModelsEnabled() && dnas[0] && dnas[1]) {
+  if (wantModels) {
     report.models = 'loading'
+    hud.setLoading(0)
     void import('./modelView')
       .then(({ ModelView }) => ModelView.load(dnas as [string, string], rig, (percent) => hud.setLoading(percent)))
       .then((models) => {
-        hud.setLoading(null)
         if (closed) return
         const backToStandins = (remember: boolean) => {
           if (closed || view !== models) return
@@ -193,13 +214,17 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
         canvas.hidden = true
         view = models
         report.models = 'ready'
+        settle()
       })
       .catch((err) => {
-        hud.setLoading(null)
         report.models = 'failed'
         report.error = String(err instanceof Error ? err.message : err)
         console.warn('Real ship models are unavailable; using stand-in hulls.', err)
+        canvas.hidden = false
+        settle()
       })
+  } else {
+    clearTimeout(modelWait)
   }
 }
 

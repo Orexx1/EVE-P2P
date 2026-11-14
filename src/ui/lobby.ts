@@ -84,6 +84,12 @@ export function createLobby(host: HTMLElement): Lobby {
     }
   })
 
+  /** Starts loading real hulls now, so they are ready by the time the fight opens. */
+  const warm = (...fits: LoadedFit[]) => {
+    if (!modelsInput.checked) return
+    void import('../arena/modelView').then((m) => m.warmShips(fits.map((f) => f.fit.shipTypeID))).catch(() => {})
+  }
+
   const setBusy = (busy: boolean) => buttons().forEach((b) => (b.disabled = busy))
   const reset = (message = '') => {
     attempt++
@@ -137,6 +143,7 @@ export function createLobby(host: HTMLElement): Lobby {
       hosted = null
       status.textContent = `Opponent connected${channel.via === 'relay' ? ' through the relay' : ''}. Exchanging fits…`
       const theirs = await handshake(channel, mine, dataset)
+      warm(mine.fit, theirs.fit)
       await launch(new HostSession([mine, { ...theirs, spec: specFor(theirs.fit) }], channel, opened.code, dataset))
     } catch (err) {
       if (id === attempt) fail(err)
@@ -162,6 +169,7 @@ export function createLobby(host: HTMLElement): Lobby {
       if (id !== attempt) return channel.close()
       status.textContent = `Connected${channel.via === 'relay' ? ' through the relay' : ''}. Exchanging fits…`
       const theirs = await handshake(channel, mine, dataset)
+      warm(mine.fit, theirs.fit)
       await launch(new GuestSession([{ ...theirs, spec: specFor(theirs.fit) }, mine], channel, code, dataset))
     } catch (err) {
       if (id === attempt) fail(err)
@@ -192,6 +200,7 @@ export function createLobby(host: HTMLElement): Lobby {
   return {
     setFit(next) {
       current = next
+      if (next) warm(next.fit)
       section.hidden = !next
       if (!next) reset()
     },

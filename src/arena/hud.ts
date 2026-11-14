@@ -70,6 +70,7 @@ export class Hud {
   private taken = 0
   private dealt = 0
   private shownResult: Result | null = null
+  private loading: number | null = null
 
   constructor(private session: Session, handlers: HudHandlers) {
     const me = session.players[session.me]
@@ -211,7 +212,9 @@ export class Hud {
 
   /** Shows how far the real ship models have loaded; null hides it. */
   setLoading(percent: number | null) {
-    this.el.loading.textContent = percent === null ? '' : `Loading ship models, ${percent}%`
+    this.loading = percent
+    // Before the fight the notice in the middle carries it; this is for hulls that arrive late.
+    this.el.loading.textContent = percent === null || !this.session.started ? '' : `Loading ship models, ${percent}%`
   }
 
   /** Adds what just happened to the combat log. */
@@ -341,9 +344,11 @@ export class Hud {
     const opponent = s.players[s.them].pilot
     this.el.notice.textContent = s.started
       ? ''
-      : !s.ready[s.them]
-        ? `Waiting for ${opponent}. The fight starts when you are both in landscape.`
-        : 'Starting…'
+      : this.loading !== null
+        ? `Loading ship models, ${this.loading}%. The fight starts when they are ready.`
+        : !s.ready[s.them]
+          ? `Waiting for ${opponent}. The fight starts when you are both ready.`
+          : 'Starting…'
 
     if (s.result && s.result !== this.shownResult) {
       this.shownResult = s.result

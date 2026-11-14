@@ -5,8 +5,12 @@
 // hulls are ready. If anything fails, the stand-ins simply stay.
 //
 // ccpwgl2 owns one canvas and one render loop for the life of the page, so the
-// engine is booted once and reused for every fight.
+// engine is booted once and reused for every fight. Starting it and fetching a
+// hull takes a while (tens of seconds on a phone), so the fit page calls
+// warmShips() as soon as it knows which ships will be needed, and hulls are
+// kept between fights.
 import { RESOURCE_RELAY } from '../config'
+import { dnaFor } from '../data/models'
 import { FIELD_OF_VIEW, type CameraRig, type FightView, type ShipView } from './rig'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -30,6 +34,78 @@ interface Stage {
 
 let stage: Promise<Stage> | null = null
 
+/** How long each step took, for the automated checks to report. */
+const timings: Record<string, number> = (((window as unknown as { __arena?: Record<string, unknown> }).__arena ??= {}).timings ??= {}) as Record<string, number>
+const timed = async <T>(name: string, work: Promise<T>): Promise<T> => {
+  const began = performance.now()
+  try {
+    return await work
+  } finally {
+    timings[name] = Math.round(performance.now() - began)
+  }
+}
+
+function getStage(): Promise<Stage> {
+  stage ??= boot().catch((err) => {
+    stage = null
+    throw err
+  })
+  return stage
+}
+
+/** A hull that is loading or loaded, waiting to be used in a fight. */
+interface Pending {
+  percent: number
+  listeners: Set<(percent: number) => void>
+  hull: Promise<any>
+}
+
+const pool = new Map<string, Pending[]>()
+
+function fetchHull(dna: string): Pending {
+  const pending: Pending = { percent: 0, listeners: new Set(), hull: null as unknown as Promise<any> }
+  const progress = (percent: number) => {
+    pending.percent = percent
+    pending.listeners.forEach((listener) => listener(percent))
+  }
+  pending.hull = timed(
+    `hull ${dna}`,
+    getStage()
+      // Built without being added to the scene: nothing appears until a fight attaches it.
+      .then((s) => s.scene.Fetch(dna, ({ percent }: { percent: number }) => progress(Math.min(percent, 99)), true))
+      .then((hull) => {
+        if (!hull) throw new Error('A hull did not load.')
+        progress(100)
+        return hull
+      }),
+  )
+  return pending
+}
+
+/** Starts loading hulls ahead of the fight: one copy per time a ship type is listed. */
+export function warmShips(shipTypeIDs: number[]) {
+  const wanted = new Map<string, number>()
+  for (const id of shipTypeIDs) {
+    const dna = dnaFor(id)
+    if (dna) wanted.set(dna, (wanted.get(dna) ?? 0) + 1)
+  }
+  for (const [dna, copies] of wanted) {
+    const list = pool.get(dna) ?? []
+    pool.set(dna, list)
+    while (list.length < copies) {
+      const pending = fetchHull(dna)
+      list.push(pending)
+      // A hull that failed is forgotten, so the fight tries again itself.
+      pending.hull.catch(() => {
+        const at = list.indexOf(pending)
+        if (at >= 0) list.splice(at, 1)
+      })
+    }
+  }
+}
+
+const take = (dna: string): Pending => pool.get(dna)?.shift() ?? fetchHull(dna)
+
 function loadScript(src: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const script = document.createElement('script')
@@ -52,7 +128,7 @@ function perspective(out: Float32Array | number[], aspect: number, near: number,
 }
 
 async function boot(): Promise<Stage> {
-  await loadScript(new URL(LIBRARY, document.baseURI).href)
+  await timed('library', loadScript(new URL(LIBRARY, document.baseURI).href))
   for (const [type, field] of EXTRA_FIELDS) {
     const cls = tw2.GetClass(type)
     if (cls) cls.blackReaders = { ...(cls.blackReaders || {}), [field]: (r: any) => r.ReadStringU16() }
@@ -89,22 +165,25 @@ async function boot(): Promise<Stage> {
   }
 
   tw2.Register({ paths: { res: `${RESOURCE_RELAY}/res/`, r: `${RESOURCE_RELAY}/res/` } })
-  await tny.Initialize({
-    canvas,
-    camera,
-    device: {
-      effectProfile: tw2.const.DeviceEffectProfile.DX11,
-      shaderQuality: tw2.const.DeviceShaderQuality.MEDIUM,
-    },
-    // Nothing is drawn between fights.
-    render: (dt: number) => made.active?.frame(dt),
-  })
+  await timed(
+    'engine',
+    tny.Initialize({
+      canvas,
+      camera,
+      device: {
+        effectProfile: tw2.const.DeviceEffectProfile.DX11,
+        shaderQuality: tw2.const.DeviceShaderQuality.MEDIUM,
+      },
+      // Nothing is drawn between fights.
+      render: (dt: number) => made.active?.frame(dt),
+    }),
+  )
   try {
     tw2.device.SetPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5))
   } catch {
     // Older builds of the library size the canvas on their own.
   }
-  made.scene = await tny.FetchScene(BACKDROP)
+  made.scene = await timed('backdrop', tny.FetchScene(BACKDROP))
   return made
 }
 
@@ -118,33 +197,22 @@ export class ModelView implements FightView {
   private constructor(
     private stage: Stage,
     private hulls: [any, any],
+    private dnas: [string, string],
     readonly rig: CameraRig,
   ) {}
 
-  /** Downloads both hulls. Rejects if the library or either hull cannot be loaded. */
+  /** Gets both hulls, from the ones already warmed if possible. Rejects if either cannot be loaded. */
   static async load(dnas: [string, string], rig: CameraRig, onProgress: (percent: number) => void): Promise<ModelView> {
-    stage ??= boot().catch((err) => {
-      stage = null
-      throw err
-    })
-    const s = await stage
-    const progress = [0, 0]
-    const report = () => onProgress(Math.round((progress[0] + progress[1]) / 2))
-    // Built without being added: nothing appears until the view is attached.
-    const hulls = (await Promise.all(
-      dnas.map((dna, i) =>
-        s.scene.Fetch(
-          dna,
-          ({ percent }: { percent: number }) => {
-            progress[i] = percent
-            report()
-          },
-          true,
-        ),
-      ),
-    )) as [any, any]
-    if (!hulls[0] || !hulls[1]) throw new Error('A hull did not load.')
-    return new ModelView(s, hulls, rig)
+    const pending = dnas.map(take)
+    const report = () => onProgress(Math.round((pending[0].percent + pending[1].percent) / 2))
+    pending.forEach((p) => p.listeners.add(report))
+    report()
+    try {
+      const hulls = (await Promise.all(pending.map((p) => p.hull))) as [any, any]
+      return new ModelView(await getStage(), hulls, dnas, rig)
+    } finally {
+      pending.forEach((p) => p.listeners.delete(report))
+    }
   }
 
   /** Puts the view on screen inside the arena, underneath the interface. */
@@ -201,7 +269,16 @@ export class ModelView implements FightView {
     const s = this.stage
     if (s.active !== this) return
     s.active = null
-    for (const hull of this.hulls) s.scene.RemoveObject(hull)
+    this.hulls.forEach((hull, i) => {
+      s.scene.RemoveObject(hull)
+      // Kept for the next fight with the same ship, so a rematch starts at once.
+      const list = pool.get(this.dnas[i]) ?? []
+      pool.set(this.dnas[i], list)
+      if (list.length < 2) {
+        hull.display = true
+        list.push({ percent: 100, listeners: new Set(), hull: Promise.resolve(hull) })
+      }
+    })
     s.holder.append(s.canvas)
   }
 }
