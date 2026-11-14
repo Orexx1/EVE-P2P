@@ -23,8 +23,9 @@ the duel.
 | 6 | Graphics options: presets, resolution, frame rate, anti-aliasing, textures, shaders | Done |
 | 7 | Extra ships on either side, flown by the computer | Done |
 | 8 | Drones and fighter squadrons as craft in space, with a drone window to command them | Done |
-| 9 | Real models for drones and fighters, bombs and micro jump drives, repair drones | Planned |
-| 10 | Overheating, scripts, boosters, implants, command bursts | Planned |
+| 9 | Fight screen laid out like the game's: status dial, target discs, sorted overview, order buttons, effects drawn between ships | Done |
+| 10 | Real models for drones and fighters, bombs and micro jump drives, repair drones | Planned |
+| 11 | Overheating, scripts, boosters, implants, command bursts | Planned |
 
 Fits are computed with every skill at level V. Both ships start with every module
 off, as if they had just undocked.
@@ -40,9 +41,29 @@ with. The computer flies the extras: each takes the nearest enemy, orbits inside
 its weapons' reach, locks, and runs its modules. The fight ends when one side
 has no ships left.
 
-In the fight, tap a ship's bracket or its overview row to select it; the
-selected item's buttons then act on it. Locked targets show as cards at the top,
-and the highlighted card is the one modules are pointed at when switched on.
+### The fight screen
+
+The screen is laid out the way the game's is, so a pilot knows where to look.
+
+- **Status dial**, bottom centre: shield, armor and hull as three arcs over the
+  top, the capacitor as a disc of cells that go dark as it drains, and speed
+  along the bottom. The module rack sits beside it, one row per slot type.
+- **Overview**, right: everything else on grid, nearest first. A row's marker is
+  boxed in yellow while that ship is locking or has locked you, and flashes red
+  while it is shooting at you or has a module on you.
+- **Selected item**, above the overview: tap a bracket in space or an overview
+  row to select it, then Approach, Orbit, Keep at range, Lock, or Look at, which
+  centres the camera on it until tapped again.
+- **Locked targets**, top: a disc each, ringed with its shield, armor and hull,
+  with the modules you have running on it underneath. The one with the turning
+  reticle is where modules go when switched on; tap another to change it.
+- **Effects between ships** are drawn for as long as they run, each in its own
+  colour and shape: webs, scramblers and disruptors, neutralizers and nosferatu,
+  jammers, painters, dampeners and tracking disruptors, and a shimmer round a
+  ship that is repairing armor, boosting shields or patching hull. Both pilots
+  see all of them, as they would on grid.
+- **Keys**, with a keyboard: F1 to F8 switch the high slots, Alt+F1 to F8 the mid
+  slots and Ctrl+F1 to F8 the low slots. Ctrl+Space stops the ship.
 
 ### What the fight models
 

@@ -98,7 +98,18 @@ html.in-arena {
   color: var(--muted);
 }
 
+/* The strip along the top: small, out of the way. */
+.arena .hud-top button {
+  min-height: 1.75rem;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.75rem;
+  border-radius: 2px;
+  background: rgb(11 16 22 / 0.86);
+  border-color: rgb(255 255 255 / 0.13);
+}
+
 .hud-top {
+  font-size: 0.75rem;
   position: absolute;
   top: max(0.5rem, env(safe-area-inset-top));
   left: max(0.5rem, env(safe-area-inset-left));
@@ -273,9 +284,54 @@ html.in-arena {
   border-color: #ff7a5c;
 }
 
-.bracket.selected .bracket-mark {
-  outline: 1px solid var(--text);
-  outline-offset: 3px;
+/* Selected: four corners close round it. */
+.bracket.selected::before {
+  content: '';
+  position: absolute;
+  inset: 8px;
+  --c: var(--text);
+  background:
+    linear-gradient(var(--c) 0 0) top left / 7px 1.5px,
+    linear-gradient(var(--c) 0 0) top left / 1.5px 7px,
+    linear-gradient(var(--c) 0 0) top right / 7px 1.5px,
+    linear-gradient(var(--c) 0 0) top right / 1.5px 7px,
+    linear-gradient(var(--c) 0 0) bottom left / 7px 1.5px,
+    linear-gradient(var(--c) 0 0) bottom left / 1.5px 7px,
+    linear-gradient(var(--c) 0 0) bottom right / 7px 1.5px,
+    linear-gradient(var(--c) 0 0) bottom right / 1.5px 7px;
+  background-repeat: no-repeat;
+  pointer-events: none;
+}
+
+.bracket.small.selected::before {
+  inset: 3px;
+}
+
+/* Locked: a ring round it. The target modules are pointed at has the ring broken and turning. */
+.bracket.locked::after,
+.bracket.locking::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border: 1.5px solid var(--hostile);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.bracket.locking::after {
+  border: 1.5px dashed var(--caution);
+  animation: turn 1.1s linear infinite;
+}
+
+.bracket.active::after {
+  inset: 0;
+  border-style: dashed;
+  animation: turn 8s linear infinite;
+}
+
+.bracket.small.locked::after,
+.bracket.small.locking::after {
+  inset: 1px;
 }
 
 .bracket.locking .bracket-mark {
@@ -285,7 +341,6 @@ html.in-arena {
 
 .bracket.locked .bracket-mark {
   border-color: #ff5a4d;
-  box-shadow: 0 0 0 3px rgb(255 90 77 / 0.25);
 }
 
 @keyframes pulse {
@@ -327,21 +382,12 @@ html.in-arena {
   border-top: 2px solid var(--friend);
 }
 
-.hud-side .panel.enemy button.primary {
+.hud-side .panel.enemy .primary svg {
   border-color: var(--hostile);
-  color: #ffd9d4;
 }
 
-.hud-side .panel.ally button.primary {
+.hud-side .panel.ally .primary svg {
   border-color: var(--friend);
-  color: #d4f2ff;
-}
-
-/* The order the ship is carrying out. */
-.arena .actions button.on {
-  border-color: var(--go);
-  color: var(--go);
-  box-shadow: inset 0 0 0.75rem -0.375rem var(--go);
 }
 
 .arena button {
@@ -352,35 +398,132 @@ html.in-arena {
   transform: scale(0.97);
 }
 
+/* Windows: dark glass with a hairline edge and a slim title strip, as a pilot expects. */
 .panel {
-  padding: 0.5rem 0.625rem;
-  background: rgb(20 29 39 / 0.82);
-  border: 1px solid var(--line);
-  border-radius: 4px;
+  padding: 0.4375rem 0.5625rem 0.5rem;
+  background: rgb(11 16 22 / 0.86);
+  border: 1px solid rgb(255 255 255 / 0.13);
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.5);
 }
 
-.panel .actions {
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: -0.4375rem -0.5625rem 0.375rem;
+  padding: 0.1875rem 0.5625rem;
+  background: linear-gradient(rgb(255 255 255 / 0.07), rgb(255 255 255 / 0.02));
+  border-bottom: 1px solid rgb(255 255 255 / 0.09);
+}
+
+.hud .panel-head h2 {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.sel-name {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The orders for the selected item: a round button each, with its name underneath. */
+.sel-actions {
   display: grid;
-  gap: 0.3125rem;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.125rem;
   margin-top: 0.4375rem;
 }
 
-.with-range {
+.arena .sel-actions button {
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 0.3125rem;
+  justify-items: center;
+  gap: 0.125rem;
+  min-height: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  font-size: 0.5625rem;
+  line-height: 1.1;
+  color: var(--muted);
+  white-space: nowrap;
 }
 
-.pair {
+.sel-actions svg {
+  width: 2rem;
+  height: 2rem;
+  padding: 0.375rem;
+  border: 1px solid rgb(255 255 255 / 0.22);
+  border-radius: 50%;
+  background: rgb(27 38 50 / 0.9);
+  fill: none;
+  stroke: var(--text);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: border-color 0.1s, box-shadow 0.1s;
+}
+
+.sel-actions svg .solid {
+  fill: var(--text);
+  stroke: none;
+}
+
+.sel-actions button:hover svg {
+  border-color: var(--text);
+}
+
+/* The order the ship is carrying out, and the thing the camera is on. */
+.sel-actions button.on {
+  color: var(--go);
+}
+
+.sel-actions button.on svg {
+  border-color: var(--go);
+  stroke: var(--go);
+  box-shadow: 0 0 0.5rem -0.125rem var(--go);
+}
+
+.sel-actions button.on svg .solid {
+  fill: var(--go);
+}
+
+.sel-ranges {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.3125rem;
+  margin-top: 0.375rem;
+  font-size: 0.6875rem;
+  color: var(--muted);
 }
 
-.pair button {
-  padding-left: 0.25rem;
-  padding-right: 0.25rem;
-  white-space: nowrap;
+.sel-ranges label {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.arena .sel-ranges select {
+  flex: 1;
+  min-width: 0;
+  min-height: 1.5rem;
+  padding: 0 0.125rem;
+  font-size: 0.75rem;
+}
+
+/* The overview: everything else on grid, nearest first. */
+.overview-scroll {
+  max-height: 7.25rem;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 .overview table {
@@ -389,40 +532,100 @@ html.in-arena {
 }
 
 .overview th {
+  position: sticky;
+  top: 0;
+  font-size: 0.6875rem;
   font-weight: 400;
   color: var(--muted);
   text-align: left;
-  padding: 0 0.25rem 0.1875rem 0;
+  padding: 0 0.25rem 0.125rem 0;
+  background: rgb(11 16 22);
 }
 
 .overview td {
-  padding: 0.1875rem 0.25rem 0.1875rem 0;
-  border-top: 1px solid var(--line);
+  padding: 0.125rem 0.25rem 0.125rem 0;
+  border-top: 1px solid rgb(255 255 255 / 0.07);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 5rem;
-}
-
-.overview {
-  max-height: 8.5rem;
-  overflow-y: auto;
+  max-width: 5.5rem;
 }
 
 .overview tbody tr {
   cursor: pointer;
 }
 
-.overview tr.enemy td:first-child {
+.overview .ico {
+  width: 1.25rem;
+  padding: 0 0.1875rem 0 0.125rem;
+  text-align: center;
+  overflow: visible;
+}
+
+/* On a narrow window there is no room to say what each thing is as well as who. */
+.overview .type {
+  display: none;
+  color: var(--muted);
+}
+
+/* The marker by each row: a square for a ship, a dot for a drone, a wedge for a squadron. */
+.mark {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border: 1.5px solid var(--friend);
+  vertical-align: -0.0625rem;
+}
+
+.enemy .mark {
+  border-color: var(--hostile);
+}
+
+.drone .mark {
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 50%;
+}
+
+.fighter .mark {
+  width: 0;
+  height: 0;
+  border: 0.25rem solid transparent;
+  border-top: 0;
+  border-bottom: 0.4375rem solid var(--friend);
+}
+
+.fighter.enemy .mark {
+  border-bottom-color: var(--hostile);
+}
+
+/* Locking or holding a lock on this pilot: boxed in yellow. Doing something to them: boxed in red, flashing. */
+.overview tr.aiming .mark {
+  outline: 1px solid var(--caution);
+  outline-offset: 2px;
+}
+
+.overview tr.attacking .mark {
+  outline: 1.5px solid var(--hostile);
+  outline-offset: 2px;
+  animation: pulse 0.7s steps(2) infinite;
+}
+
+.overview tr.enemy td:nth-child(3) {
   color: #ff9c86;
 }
 
-.overview tr.ally td:first-child {
+.overview tr.ally td:nth-child(3) {
   color: #8fd0ff;
 }
 
+/* Locked by this pilot. */
+.overview tr.locked td:nth-child(3) {
+  font-weight: 600;
+}
+
 .overview tr.selected td {
-  background: rgb(230 235 239 / 0.12);
+  background: rgb(230 235 239 / 0.13);
 }
 
 .overview tr.dead td {
@@ -430,11 +633,22 @@ html.in-arena {
   text-decoration: line-through;
 }
 
+.overview tr.dead .mark {
+  opacity: 0.3;
+}
+
 .overview .num {
   text-align: right;
-  padding-left: 0.5rem;
+  padding-left: 0.375rem;
   padding-right: 0;
   max-width: none;
+}
+
+/* Distance sits before the name, so it needs air on its right. */
+.overview .num:nth-child(2) {
+  width: 3.25rem;
+  padding-left: 0;
+  padding-right: 0.5rem;
 }
 
 /* Bottom centre: hostile effects, then the ship's status beside its modules. */
@@ -478,87 +692,51 @@ html.in-arena {
   white-space: nowrap;
 }
 
+/* The ship's status: a dial with no window round it, and what the ship is doing written beside it. */
 .ship-hud {
   display: grid;
-  grid-template-columns: 7.5rem auto auto;
-  align-items: end;
-  column-gap: 0.625rem;
-  padding: 0.375rem 0.625rem 0.4375rem;
-  background: rgb(20 29 39 / 0.82);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-}
-
-.ship-hud button {
-  white-space: nowrap;
-}
-
-.ship-hud svg {
-  width: 7.5rem;
-  grid-row: 1 / 3;
-}
-
-.ship-hud path {
-  fill: none;
-  stroke-width: 5;
-}
-
-.ship-hud .track {
-  stroke: var(--line);
-}
-
-/* Each arc is drawn as a dash whose length is the layer's percentage. */
-.ship-hud .fill {
-  stroke-dasharray: 100 100;
-  transition: stroke-dasharray 0.2s linear;
-}
-
-.ship-hud .shield {
-  stroke: var(--shield);
-}
-
-.ship-hud .armor {
-  stroke: var(--armor);
-}
-
-.ship-hud .hull {
-  stroke: var(--hull);
-}
-
-.ship-hud .cap {
-  stroke: #e8d27a;
+  grid-template-columns: auto 7.25rem;
+  align-items: center;
+  column-gap: 0.5rem;
 }
 
 .ship-readout {
-  min-width: 8.5rem;
+  display: grid;
+  justify-items: end;
+  gap: 0.0625rem;
+  min-width: 6.5rem;
+  max-width: 9.5rem;
+  text-align: right;
+  text-shadow: 0 0 3px #000, 0 0 3px #000;
 }
 
-.ship-readout .speed {
-  font-size: 1.125rem;
+.ship-name {
   font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.ship-readout .sub {
+  font-size: 0.75rem;
   line-height: 1.2;
 }
 
-.speed-bar {
-  height: 4px;
-  margin: 0.1875rem 0;
-  background: var(--line);
-  border-radius: 2px;
-  overflow: hidden;
-}
-
-.speed-bar span {
-  display: block;
-  height: 100%;
-  width: 0;
-  background: var(--go);
-  box-shadow: 0 0 0.5rem var(--go);
+.arena .ship-readout button {
+  min-height: 1.625rem;
+  margin-top: 0.1875rem;
+  padding: 0.0625rem 0.5rem;
+  font-size: 0.75rem;
+  white-space: nowrap;
 }
 
 .layers {
-  grid-column: 2 / 4;
   display: flex;
-  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0 0.3125rem;
+  font-size: 0.6875rem;
   white-space: nowrap;
 }
 
@@ -578,14 +756,80 @@ html.in-arena {
   color: #e8d27a;
 }
 
-.ship-name {
-  display: none;
-  grid-column: 2 / 4;
-  color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 16rem;
+.dial {
+  width: 7.25rem;
+  height: 7.25rem;
+}
+
+.dial-back {
+  fill: rgb(7 11 15 / 0.78);
+  stroke: rgb(255 255 255 / 0.1);
+  stroke-width: 0.6;
+}
+
+.dial .track,
+.dial .fill {
+  fill: none;
+  stroke-width: 4.4;
+}
+
+.dial .track {
+  stroke: rgb(255 255 255 / 0.09);
+  stroke-dasharray: 240 360;
+}
+
+/* Each arc is drawn as a dash whose length is how much of the layer is left. */
+.dial .fill {
+  stroke-dasharray: 240 360;
+  transition: stroke-dasharray 0.2s linear;
+}
+
+.dial .shield {
+  stroke: var(--shield);
+}
+
+.dial .armor {
+  stroke: var(--armor);
+}
+
+.dial .hull {
+  stroke: var(--hull);
+}
+
+/* The capacitor: lit cells are charge. */
+.cell {
+  stroke: #f0d77c;
+  transition: stroke 0.25s, opacity 0.25s;
+}
+
+.cell.off {
+  stroke: #3a3524;
+  opacity: 0.55;
+}
+
+.cap-text,
+.speed-text {
+  fill: var(--text);
+  font-size: 8.5px;
+  font-weight: 600;
+  text-anchor: middle;
+}
+
+.cap-text {
+  fill: #f0d77c;
+  font-size: 7px;
+}
+
+.dial .speed-track,
+.dial .speed-fill {
+  stroke-width: 3;
+  stroke-dasharray: 100 100;
+}
+
+.dial .speed-fill {
+  stroke: var(--go);
+  stroke-dasharray: 0 100;
+  filter: drop-shadow(0 0 2px var(--go));
 }
 
 /* The module rack: one row per slot type, high slots on top, as in game. */
@@ -955,7 +1199,7 @@ html.in-arena {
   transform: none;
 }
 
-.bracket.small:not(.selected):not(.locking):not(.locked) .bracket-mark {
+.bracket.small .bracket-mark {
   border-color: transparent;
 }
 
@@ -963,9 +1207,6 @@ html.in-arena {
   top: 24px;
 }
 
-.overview tr.small td:first-child {
-  padding-left: 0.5rem;
-}
 
 /* Locked targets, top centre: a card each with shield, armor and hull. The
    highlighted card is the one modules are pointed at. */
@@ -980,32 +1221,131 @@ html.in-arena {
   pointer-events: none;
 }
 
+/* A locked target: a disc ringed with its shield, armor and hull, its name and range under it,
+   and under those the modules running on it. */
 .arena .target {
-  flex: 0 1 8.5rem;
-  min-width: 4.5rem;
+  flex: 0 0 3.75rem;
+  width: 3.75rem;
   min-height: 0;
   display: grid;
-  gap: 2px;
-  padding: 0.25rem 0.4375rem 0.3125rem;
-  text-align: left;
-  background: rgb(20 29 39 / 0.82);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  opacity: 0.8;
+  justify-items: center;
+  gap: 0.0625rem;
+  padding: 0;
+  background: none;
+  border: 0;
   pointer-events: auto;
+  text-shadow: 0 0 3px #000, 0 0 3px #000;
 }
 
-.arena .target.active {
-  border-color: #ff5a4d;
-  opacity: 1;
+.target-disc {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 3.25rem;
+  height: 3.25rem;
 }
 
-.arena .target.ally.active {
-  border-color: #8fd0ff;
+.target-disc svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.target-disc .track,
+.target-disc .fill {
+  fill: none;
+  stroke-width: 3;
+}
+
+.target-disc .track {
+  stroke: rgb(255 255 255 / 0.12);
+  stroke-dasharray: 270 360;
+}
+
+.target-disc .fill {
+  transition: stroke-dasharray 0.2s linear;
+}
+
+.target-disc .shield {
+  stroke: var(--shield);
+}
+
+.target-disc .armor {
+  stroke: var(--armor);
+}
+
+.target-disc .hull {
+  stroke: var(--hull);
+}
+
+.target-icon {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  overflow: hidden;
+  background: #0b1117;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--muted);
+  position: relative;
+}
+
+.target-icon img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: #0b1117;
+}
+
+/* The reticle only shows on the target modules are pointed at, turning slowly; a lock in progress spins faster. */
+.target-disc .reticle {
+  fill: none;
+  stroke: none;
+  stroke-width: 1.4;
+  stroke-dasharray: 14 31.550;
+  transform-origin: 30px 30px;
+}
+
+.target.active .reticle {
+  stroke: var(--hostile);
+  animation: turn 6s linear infinite;
+}
+
+.target.ally.active .reticle {
+  stroke: var(--friend);
+}
+
+.target.locking .reticle {
+  stroke: var(--caution);
+  animation: turn 1.1s linear infinite;
+}
+
+.target.locking .target-icon {
+  opacity: 0.35;
+}
+
+@keyframes turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.target-count {
+  position: absolute;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--caution);
 }
 
 .target-name {
+  max-width: 100%;
+  font-size: 0.6875rem;
   font-weight: 600;
+  line-height: 1.15;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1013,8 +1353,34 @@ html.in-arena {
 
 .target .sub {
   font-size: 0.6875rem;
-  line-height: 1.2;
+  line-height: 1.15;
   white-space: nowrap;
+}
+
+.target-mods {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1px;
+  min-height: 0.875rem;
+}
+
+.target-mods i {
+  position: relative;
+  width: 0.875rem;
+  height: 0.875rem;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--go);
+  box-shadow: 0 0 0 1px var(--go-dim);
+}
+
+.target-mods img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: #101820;
 }
 
 .bars {
@@ -1178,7 +1544,8 @@ html.in-arena {
   }
 
   .hud.wide-rack .ship-readout {
-    min-width: 6.5rem;
+    min-width: 0;
+    max-width: 6.5rem;
   }
 }
 
@@ -1207,6 +1574,33 @@ html.in-arena {
   }
 
   .hud-side {
-    width: 17rem;
+    width: 21rem;
+  }
+
+  .overview .type {
+    display: table-cell;
+  }
+
+  .overview-scroll {
+    max-height: 14rem;
+  }
+
+  .arena .target {
+    flex-basis: 4.5rem;
+    width: 4.5rem;
+  }
+
+  .target-disc {
+    width: 3.75rem;
+    height: 3.75rem;
+  }
+
+  .dial {
+    width: 8.5rem;
+    height: 8.5rem;
+  }
+
+  .ship-hud {
+    grid-template-columns: auto 8.5rem;
   }
 }

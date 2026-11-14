@@ -41,10 +41,42 @@ const SLOT_ROWS: Array<[string, string]> = [
 const rangeOptions = (selected: number) =>
   RANGES.map((r) => `<option value="${r}"${r === selected ? ' selected' : ''}>${formatRange(r)}</option>`).join('')
 
-// Half-ring gauge: outer to inner is shield, armor, hull, then capacitor.
-function arc(radius: number, cls: string, el = ''): string {
-  return `<path class="${cls}"${el ? ` data-el="${el}"` : ''} d="M ${60 - radius} 62 A ${radius} ${radius} 0 0 1 ${60 + radius} 62" pathLength="100" />`
+// The ship's status dial. Shield, armor and hull are three arcs over the top,
+// outermost first; the capacitor is the disc of cells in the middle, which go
+// dark spoke by spoke as it drains; speed is the arc along the bottom.
+const DIAL_SWEEP = 240
+const dialArc = (radius: number, cls: string, el = '') =>
+  `<circle class="${cls}"${el ? ` data-el="${el}"` : ''} cx="60" cy="60" r="${radius}" pathLength="360" transform="rotate(150 60 60)" />`
+const CAP_SPOKES = 16
+const CAP_RINGS: Array<[number, number, number]> = [
+  [30, 36, 5.2],
+  [22, 28, 4],
+  [14, 20, 2.8],
+]
+function capCells(): string {
+  let cells = ''
+  for (let spoke = 0; spoke < CAP_SPOKES; spoke++) {
+    const angle = -Math.PI / 2 + (spoke * Math.PI * 2) / CAP_SPOKES
+    const at = (r: number) => `${(60 + Math.cos(angle) * r).toFixed(2)} ${(60 + Math.sin(angle) * r).toFixed(2)}`
+    for (const [inner, outer, width] of CAP_RINGS) cells += `<path class="cell" d="M ${at(inner)} L ${at(outer)}" stroke-width="${width}" />`
+  }
+  return cells
 }
+
+/** A locked target's ring: shield, armor and hull from the outside in, over three quarters of a circle. */
+const TARGET_SWEEP = 270
+const targetArc = (radius: number, cls: string) => `<circle class="${cls}" cx="30" cy="30" r="${radius}" pathLength="360" transform="rotate(135 30 30)" />`
+
+// Order buttons carry a small drawing each, so the row reads at a glance.
+const glyph = (body: string) => `<svg viewBox="0 0 20 20" aria-hidden="true">${body}</svg>`
+const GLYPH = {
+  approach: glyph('<path d="M2 10h9M8 6l4 4-4 4" /><circle cx="16" cy="10" r="2" />'),
+  orbit: glyph('<circle cx="10" cy="10" r="6.5" stroke-dasharray="3 2.2" /><circle cx="10" cy="10" r="1.6" class="solid" /><circle cx="16.5" cy="10" r="1.6" class="solid" />'),
+  keep: glyph('<path d="M3 4v12M17 4v12M6 10h8M8 7.5 5.5 10 8 12.5M12 7.5l2.5 2.5-2.5 2.5" />'),
+  lock: glyph('<circle cx="10" cy="10" r="5" /><path d="M10 2v4M10 14v4M2 10h4M14 10h4" />'),
+  look: glyph('<path d="M2 10c2.4-3.6 5-5.4 8-5.4s5.600 1.800 8 5.400c-2.400 3.600-5 5.400-8 5.400s-5.600-1.800-8-5.400z" /><circle cx="10" cy="10" r="2.2" class="solid" />'),
+}
+const HOSTILE_SECONDS = 8
 
 const percent = (value: number, max: number) => (max > 0 ? Math.max(0, Math.min(100, (value / max) * 100)) : 0)
 
@@ -63,10 +95,10 @@ function describe(m: ModuleStats): string {
   return parts.join(', ')
 }
 
-function moduleButton(m: ModuleStats, index: number): string {
+function moduleButton(m: ModuleStats, index: number, key = ''): string {
   const inert = m.kind === 'passive' || m.kind === 'unsupported'
   return `
-    <button type="button" class="mod ${inert ? m.kind : ''}" data-mod="${index}" title="${esc(describe(m))}"
+    <button type="button" class="mod ${inert ? m.kind : ''}" data-mod="${index}" title="${esc(describe(m))}${key && !inert ? ` (${key})` : ''}"
       aria-label="${esc(m.name)}" aria-pressed="false"${inert ? ' disabled' : ''}>
       <span class="mod-face">
         <span class="mod-name">${esc(m.name.split(' ')[0].slice(0, 6))}</span>
@@ -186,6 +218,7 @@ export class Hud {
   /** Call when the fight view closes. */
   dispose() {
     this.stopGraphics?.()
+    this.stopKeys?.()
   }
 
   /** The ship, drone or squadron the selected-item buttons act on. */
@@ -197,6 +230,14 @@ export class Hud {
   /** Which of them share a heading in the drone window. */
   private groups: number[][] = []
   private tiles: HTMLButtonElement[] = []
+  private cells: HTMLElement[] = []
+  private litCells = -1
+  /** The ship, drone or squadron the camera is centred on; the pilot's own ship unless they look at something else. */
+  focus: number
+  /** When each thing last shot at this pilot or their drones, by the frame clock. */
+  private shotBy: number[] = []
+  private clock = 0
+  private stopKeys: (() => void) | null = null
   private abilities: HTMLButtonElement[][] = []
   private handlers: HudHandlers
   private targetsKey = ''
@@ -204,6 +245,7 @@ export class Hud {
 
   constructor(private session: Session, handlers: HudHandlers) {
     this.handlers = handlers
+    this.focus = session.me
     const me = session.players[session.me]
     const rack = session.rack
     const entities = session.entities
@@ -218,7 +260,10 @@ export class Hud {
       else this.groups.push([n])
     })
     const rows = SLOT_ROWS.map(([slot, label]) => {
-      const buttons = rack.map((m, i) => (m.slot === slot ? moduleButton(m, i) : '')).join('')
+      // F1 to F8 switch the high slots, with Alt for the mid slots and Ctrl for the low slots.
+      const prefix = slot === 'HI' ? '' : slot === 'MED' ? 'Alt+' : 'Ctrl+'
+      let position = 0
+      const buttons = rack.map((m, i) => (m.slot === slot ? moduleButton(m, i, ++position <= 8 ? `${prefix}F${position}` : '') : '')).join('')
       return buttons ? `<div class="rack-row" role="group" aria-label="${label}">${buttons}</div>` : ''
     }).join('')
 
@@ -255,38 +300,39 @@ export class Hud {
         .join('')}
 
       <aside class="hud-side">
-        <section class="panel" data-el="selPanel" aria-label="Selected item">
-          <h2 data-el="selName"></h2>
+        <section class="panel selected-item" data-el="selPanel" aria-label="Selected item">
+          <header class="panel-head"><h2>Selected item</h2></header>
+          <p class="sel-name" data-el="selName"></p>
           <p class="sub"><span data-el="selType"></span> <span data-el="selRange"></span></p>
-          <div class="actions">
-            <div class="pair">
-              <button type="button" class="primary" data-act="lock" data-el="lock">Lock target</button>
-              <button type="button" data-act="approach">Approach</button>
-            </div>
-            <div class="with-range">
-              <button type="button" data-act="orbit">Orbit</button>
-              <select data-el="orbitRange" aria-label="Orbit distance">${rangeOptions(5_000)}</select>
-            </div>
-            <div class="with-range">
-              <button type="button" data-act="keep">Keep at range</button>
-              <select data-el="keepRange" aria-label="Keep at range distance">${rangeOptions(10_000)}</select>
-            </div>
+          <div class="sel-actions">
+            <button type="button" data-act="approach" title="Approach">${GLYPH.approach}<span>Approach</span></button>
+            <button type="button" data-act="orbit" title="Orbit at the distance set below">${GLYPH.orbit}<span>Orbit</span></button>
+            <button type="button" data-act="keep" title="Keep at the range set below">${GLYPH.keep}<span>Keep</span></button>
+            <button type="button" class="primary" data-act="lock" title="Lock or unlock this target">${GLYPH.lock}<span data-el="lock">Lock</span></button>
+            <button type="button" data-act="look" data-el="look" title="Centre the camera on this; again to return to your ship">${GLYPH.look}<span>Look at</span></button>
+          </div>
+          <div class="sel-ranges">
+            <label>Orbit <select data-el="orbitRange" aria-label="Orbit distance">${rangeOptions(5_000)}</select></label>
+            <label>Keep <select data-el="keepRange" aria-label="Keep at range distance">${rangeOptions(10_000)}</select></label>
           </div>
         </section>
         <section class="panel overview" aria-label="Overview">
-          <table>
-            <thead><tr><th>Name</th><th class="num">Distance</th><th class="num">Speed</th></tr></thead>
-            <tbody>
-              ${others
-                .map(
-                  (i) => `
-              <tr class="${side(i)}${entities[i].kind === 'ship' ? '' : ' small'}" data-ship="${i}" data-row${entities[i].kind === 'ship' ? '' : ' hidden'}>
-                <td>${esc(entities[i].name)}</td><td class="num"></td><td class="num"></td>
-              </tr>`,
-                )
-                .join('')}
-            </tbody>
-          </table>
+          <header class="panel-head"><h2>Overview</h2><span class="sub" data-el="ovCount"></span></header>
+          <div class="overview-scroll">
+            <table>
+              <thead><tr><th class="ico"></th><th class="num">Distance</th><th>Name</th><th class="type">Type</th><th class="num">Speed</th></tr></thead>
+              <tbody data-el="ovBody">
+                ${others
+                  .map(
+                    (i) => `
+                <tr class="${side(i)} ${entities[i].kind}" data-ship="${i}" data-row${entities[i].kind === 'ship' ? '' : ' hidden'}>
+                  <td class="ico"><i class="mark"></i></td><td class="num"></td><td>${esc(entities[i].name)}</td><td class="type">${esc(entities[i].type)}</td><td class="num"></td>
+                </tr>`,
+                  )
+                  .join('')}
+              </tbody>
+            </table>
+          </div>
         </section>
       </aside>
 
@@ -298,18 +344,22 @@ export class Hud {
         <p class="effects" data-el="effects" role="status"></p>
         <div class="hud-bottom-row">
           <section class="ship-hud" aria-label="Your ship">
-            <svg viewBox="0 0 120 66" aria-hidden="true">
-              ${arc(54, 'track')}${arc(46, 'track')}${arc(38, 'track')}${arc(28, 'track')}
-              ${arc(54, 'fill shield', 'gShield')}${arc(46, 'fill armor', 'gArmor')}${arc(38, 'fill hull', 'gHull')}${arc(28, 'fill cap', 'gCap')}
-            </svg>
             <div class="ship-readout">
-              <p class="speed"><span data-el="speed">0</span> m/s</p>
-              <div class="speed-bar" aria-hidden="true"><span data-el="speedBar"></span></div>
+              <p class="ship-name">${esc(me.fit.shipName)}</p>
               <p class="sub" data-el="order"></p>
+              <p class="layers" data-el="layers"></p>
+              <button type="button" data-act="stop" title="Stop the ship (Ctrl+Space)">Stop ship</button>
             </div>
-            <button type="button" data-act="stop">Stop ship</button>
-            <p class="layers" data-el="layers"></p>
-            <p class="ship-name">${esc(me.fit.shipName)}, ${esc(me.pilot)}</p>
+            <svg class="dial" viewBox="0 0 120 120" role="img" aria-label="Shield, armor, hull, capacitor and speed">
+              <circle class="dial-back" cx="60" cy="60" r="59" />
+              ${dialArc(55, 'track')}${dialArc(49, 'track')}${dialArc(43, 'track')}
+              ${dialArc(55, 'fill shield', 'gShield')}${dialArc(49, 'fill armor', 'gArmor')}${dialArc(43, 'fill hull', 'gHull')}
+              <g class="cap-cells">${capCells()}</g>
+              <text class="cap-text" x="60" y="63.200" data-el="capText"></text>
+              <path class="track speed-track" d="M 16.340 96.640 A 57 57 0 0 0 103.660 96.640" pathLength="100" />
+              <path class="fill speed-fill" d="M 16.340 96.640 A 57 57 0 0 0 103.660 96.640" pathLength="100" data-el="gSpeed" />
+              <text class="speed-text" x="60" y="108.500"><tspan data-el="speed">0</tspan> m/s</text>
+            </svg>
           </section>
           <section class="rack" aria-label="Modules">
             ${rows}
@@ -334,6 +384,23 @@ export class Hud {
       const [n, k] = node.dataset.ability!.split(':').map(Number)
       ;(this.abilities[n] ??= [])[k] = node
     })
+    this.cells = [...this.root.querySelectorAll<HTMLElement>('.cell')]
+    const onKey = (event: KeyboardEvent) => {
+      if (this.root.hidden || (event.target as HTMLElement | null)?.closest?.('input, select, textarea')) return
+      const f = /^F([1-8])$/.exec(event.key)
+      if (f) {
+        const slot = event.altKey ? 'MED' : event.ctrlKey ? 'LO' : 'HI'
+        const index = rack.map((m, i) => (m.slot === slot ? i : -1)).filter((i) => i >= 0)[Number(f[1]) - 1]
+        const run = session.own.modules[index]
+        if (run && rack[index].kind !== 'passive' && rack[index].kind !== 'unsupported') handlers.command({ c: 'mod', i: index, on: !run.wanted })
+        event.preventDefault()
+      } else if (event.code === 'Space' && event.ctrlKey) {
+        handlers.order({ kind: 'stop' })
+        event.preventDefault()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    this.stopKeys = () => window.removeEventListener('keydown', onKey)
     this.root.classList.toggle('wide-rack', SLOT_ROWS.some(([slot]) => rack.filter((m) => m.slot === slot).length > 6))
     this.root.classList.toggle('has-craft', session.craftStats.length > 0)
     this.root.classList.toggle('has-squadrons', session.craftStats.some((c) => c.kind === 'fighter'))
@@ -399,6 +466,7 @@ export class Hud {
       if (act === 'keep') handlers.order({ kind: 'keep', target: on, range: range('keepRange') })
       if (act === 'stop') handlers.order({ kind: 'stop' })
       if (act === 'lock') handlers.command({ c: lockState(session.own, on) === LOCK_NONE ? 'lock' : 'unlock', t: on })
+      if (act === 'look') this.focus = this.focus === on ? session.me : on
       if (act === 'leave') handlers.leave()
       if (act === 'fullscreen') void this.fullscreen()
       if (act === 'graphics') {
@@ -524,6 +592,7 @@ export class Hud {
         if (event.quality === 0) push(event.from === me ? `Your ${event.name} cannot reach the target.` : `${event.name} falls short of you.`, 'miss')
       } else {
         const mine = mineIs(event.from)
+        if (!mine) this.shotBy[event.from] = this.clock
         const missed = event.t === 'fire' && event.quality === 0
         const verb = event.t === 'fire' ? QUALITY[Math.max(0, Math.min(6, event.quality))] : 'hits'
         if (mine) this.dealt += event.damage
@@ -723,6 +792,7 @@ export class Hud {
       const button = this.mods[i]
       if (button && run.on) button.style.setProperty('--p', String(Math.round(100 - percent(run.left, run.total))))
     })
+    this.clock = now
     if (now - this.lastText < 200) return
     this.lastText = now
     this.reselect(ships)
@@ -734,23 +804,41 @@ export class Hud {
     const sel = this.selected
     const chosen = s.entities[sel]
 
-    // Every other ship: its bracket and its overview row.
+    // Everything else in space: its bracket and its overview row.
     this.brackets.forEach((bracket, i) => {
       const lock = lockState(own, i)
       bracket.classList.toggle('locking', lock === LOCK_LOCKING)
       bracket.classList.toggle('locked', lock === LOCK_LOCKED)
+      bracket.classList.toggle('active', i === own.active)
       bracket.classList.toggle('selected', i === sel)
       ;(bracket.lastElementChild as HTMLElement).textContent = i === sel || lock !== LOCK_NONE ? rangeTo(i) : ''
     })
+    // The overview is kept nearest first. A row's marker is boxed in yellow while that ship
+    // is locking or has locked this pilot, and flashes red while it is doing something to them.
+    const range = new Map<number, number>()
+    const onMe = new Set(s.links.filter(([from, to]) => from !== to && (to === s.me || s.entities[to]?.owner === s.me)).map(([from]) => from))
+    let listed = 0
     this.rows.forEach((row, i) => {
       const dead = !!s.sights[i]?.dead
+      const ship = s.entities[i].kind === 'ship'
       // A drone or squadron is only listed while it is in space.
-      if (s.entities[i].kind !== 'ship') row.hidden = dead
+      if (!ship) row.hidden = dead
+      if (!row.hidden && !dead) listed++
+      range.set(i, dead ? Infinity : dist(mine.pos, ships[i].pos))
+      const lockOnMe = s.sights[i]?.lock ?? LOCK_NONE
+      const attacking = !dead && (onMe.has(i) || (this.shotBy[i] !== undefined && now - this.shotBy[i] < HOSTILE_SECONDS * 1000))
       row.classList.toggle('dead', dead)
       row.classList.toggle('selected', i === sel)
+      row.classList.toggle('locked', lockState(own, i) === LOCK_LOCKED)
+      row.classList.toggle('aiming', !dead && !attacking && lockOnMe !== LOCK_NONE)
+      row.classList.toggle('attacking', attacking)
       row.children[1].textContent = dead ? 'destroyed' : rangeTo(i)
-      row.children[2].textContent = dead ? '' : `${int(len(ships[i].vel))} m/s`
+      row.children[4].textContent = dead ? '' : `${int(len(ships[i].vel))} m/s`
     })
+    const body = this.el.ovBody
+    const sorted = [...body.children].sort((x, y) => range.get(Number((x as HTMLElement).dataset.ship))! - range.get(Number((y as HTMLElement).dataset.ship))!)
+    if (sorted.some((row, n) => row !== body.children[n])) body.append(...sorted)
+    this.el.ovCount.textContent = String(listed)
 
     // Selected item.
     if (chosen) {
@@ -759,11 +847,12 @@ export class Hud {
       this.el.selRange.textContent = rangeTo(sel)
       const lock = lockState(own, sel)
       const left = own.locks.find((l) => l.target === sel)?.left ?? 0
-      this.el.lock.textContent = lock === LOCK_LOCKED ? 'Unlock' : lock === LOCK_LOCKING ? `Locking ${left.toFixed(1)} s` : 'Lock target'
+      this.el.lock.textContent = lock === LOCK_LOCKED ? 'Unlock' : lock === LOCK_LOCKING ? `${left.toFixed(1)} s` : 'Lock'
+      this.el.look.classList.toggle('on', this.focus === sel)
     }
 
     this.el.speed.textContent = int(speed)
-    this.el.speedBar.style.width = `${top > 0 ? Math.min(100, (speed / top) * 100) : 0}%`
+    this.el.gSpeed.style.strokeDasharray = `${(top > 0 ? Math.min(100, (speed / top) * 100) : 0).toFixed(1)} 100`
     const about = 'target' in mine.order && s.entities.length > 2 ? `, ${s.entities[mine.order.target]?.name ?? ''}` : ''
     this.el.order.textContent = describeOrder(mine.order) + about
     const t = Math.floor(s.world.time)
@@ -773,8 +862,14 @@ export class Hud {
     // Own ship.
     const layers = [0, 1, 2].map((i) => percent(own.hp[i], own.hpMax[i]))
     const cap = percent(own.cap, own.capMax)
-    ;['gShield', 'gArmor', 'gHull'].forEach((key, i) => (this.el[key].style.strokeDasharray = `${layers[i].toFixed(1)} 100`))
-    this.el.gCap.style.strokeDasharray = `${cap.toFixed(1)} 100`
+    ;['gShield', 'gArmor', 'gHull'].forEach((key, i) => (this.el[key].style.strokeDasharray = `${((layers[i] / 100) * DIAL_SWEEP).toFixed(1)} 360`))
+    // Capacitor cells go dark from the last spoke backwards as it drains.
+    const lit = Math.ceil((cap / 100) * this.cells.length - 1e-6)
+    if (lit !== this.litCells) {
+      this.litCells = lit
+      this.cells.forEach((cell, n) => cell.classList.toggle('off', n >= lit))
+    }
+    this.el.capText.textContent = `${Math.round(cap)}%`
     this.el.layers.innerHTML =
       `<span class="shield">${Math.round(layers[0])}%</span> <span class="armor">${Math.round(layers[1])}%</span> ` +
       `<span class="hull">${Math.round(layers[2])}%</span> <span class="cap">Cap ${Math.round(cap)}%</span>`
@@ -800,32 +895,49 @@ export class Hud {
     })
     this.drawCraft()
 
-    // Locked targets: a card each. Rebuilt only when the set changes, so a tap is never lost mid-press.
+    // Locked targets: a disc each, ringed with its shield, armor and hull. Rebuilt only when the set changes, so a tap is never lost mid-press.
     const key = own.locks.map((l) => `${l.target}${l.left > 0 ? 'x' : ''}`).join(',') + `|${own.active}`
     if (key !== this.targetsKey) {
       this.targetsKey = key
       this.el.targets.innerHTML = own.locks
-        .map(
-          (l) => `
-        <button type="button" class="target ${s.entities[l.target].team === s.myTeam ? 'ally' : 'enemy'}${l.target === own.active ? ' active' : ''}" data-target="${l.target}"
-          aria-label="${esc(s.entities[l.target].name)}${l.target === own.active ? ', active target' : ''}">
-          <span class="target-name">${esc(s.entities[l.target].name)}</span>
-          <span class="bars">
-            <span class="bar shield"><span></span></span>
-            <span class="bar armor"><span></span></span>
-            <span class="bar hull"><span></span></span>
+        .map((l) => {
+          const entity = s.entities[l.target]
+          return `
+        <button type="button" class="target ${entity.team === s.myTeam ? 'ally' : 'enemy'}${l.target === own.active ? ' active' : ''}${l.left > 0 ? ' locking' : ''}" data-target="${l.target}"
+          aria-label="${esc(entity.name)}${l.target === own.active ? ', active target' : ''}">
+          <span class="target-disc">
+            <span class="target-icon">${esc(entity.name.slice(0, 2))}${icon(entity.typeID)}</span>
+            <svg viewBox="0 0 60 60" aria-hidden="true">
+              ${targetArc(28, 'track')}${targetArc(24, 'track')}${targetArc(20, 'track')}
+              ${targetArc(28, 'fill shield')}${targetArc(24, 'fill armor')}${targetArc(20, 'fill hull')}
+              <circle class="reticle" cx="30" cy="30" r="29" />
+            </svg>
+            <span class="target-count"></span>
           </span>
+          <span class="target-name">${esc(entity.name)}</span>
           <span class="sub"></span>
-        </button>`,
-        )
+          <span class="target-mods"></span>
+        </button>`
+        })
         .join('')
+      this.el.targets.querySelectorAll<HTMLImageElement>('img').forEach((img) => img.addEventListener('error', () => img.remove()))
     }
     own.locks.forEach((l, n) => {
       const card = this.el.targets.children[n] as HTMLElement | undefined
       const sight = s.sights[l.target]
       if (!card || !sight) return
-      card.querySelectorAll<HTMLElement>('.bar span').forEach((bar, layer) => (bar.style.width = `${(sight.hp[layer] * 100).toFixed(1)}%`))
-      ;(card.lastElementChild as HTMLElement).textContent = l.left > 0 ? `Locking ${l.left.toFixed(1)} s` : rangeTo(l.target)
+      card.querySelectorAll<HTMLElement>('.fill').forEach((ring, layer) => (ring.style.strokeDasharray = `${(sight.hp[layer] * TARGET_SWEEP).toFixed(1)} 360`))
+      card.querySelector('.target-count')!.textContent = l.left > 0 ? l.left.toFixed(1) : ''
+      card.querySelector('.sub')!.textContent = l.left > 0 ? 'locking' : rangeTo(l.target)
+      // Under each target: the modules this pilot has running on it.
+      const mods = card.querySelector<HTMLElement>('.target-mods')!
+      const running = own.modules.map((run, i) => (run.on && run.target === l.target ? i : -1)).filter((i) => i >= 0)
+      const modsKey = running.join(',')
+      if (mods.dataset.key !== modsKey) {
+        mods.dataset.key = modsKey
+        mods.innerHTML = running.map((i) => `<i title="${esc(s.rack[i].name)}">${icon(s.rack[i].typeID)}</i>`).join('')
+        mods.querySelectorAll<HTMLImageElement>('img').forEach((img) => img.addEventListener('error', () => img.remove()))
+      }
     })
 
     if (this.el.craft) this.el.craft.hidden = !s.started
@@ -839,7 +951,7 @@ export class Hud {
     for (const act of ['approach', 'orbit', 'keep']) {
       this.orderButtons[act]?.classList.toggle('on', order.kind === act && 'target' in order && order.target === sel)
     }
-    this.el.selPanel.className = `panel ${chosen?.team === s.myTeam ? 'ally' : 'enemy'}`
+    this.el.selPanel.className = `panel selected-item ${chosen?.team === s.myTeam ? 'ally' : 'enemy'}`
 
     if (s.result && s.result !== this.shownResult) {
       this.shownResult = s.result

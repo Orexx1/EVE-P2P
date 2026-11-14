@@ -14,6 +14,7 @@ import { FitError, loadFit, type LoadedFit } from '../fit/loadFit'
 import type { Channel } from '../net/room'
 import {
   Combat,
+  LINK_KINDS,
   lockState,
   parseCommand,
   type AbilityKind,
@@ -22,6 +23,7 @@ import {
   type CombatEvent,
   type CraftState,
   type CraftStats,
+  type Link,
   type Lock,
   type LockState,
   type ModuleRun,
@@ -391,6 +393,8 @@ export abstract class Session {
   events: CombatEvent[] = []
   /** How the two players are connected; null when flying solo. */
   via: Channel['via'] | null = null
+  /** What can be seen happening between ships right now: webs, neutralizers, repairs and the like. */
+  links: Link[] = []
   protected over = false
 
   constructor(
@@ -539,6 +543,7 @@ export class HostSession extends Session {
     this.maxLocked = combat.stats[0].maxLocked
     this.own = ownView(combat, 0)
     this.sights = sights(combat, 0)
+    this.links = combat.links(this.world)
     // Wrecks drift to a halt.
     this.players.forEach((_, index) => {
       if (combat.ships[index].dead && this.world.ships[index].order.kind !== 'stop') this.world.ships[index].order = { kind: 'stop' }
@@ -630,6 +635,7 @@ export class HostSession extends Session {
       own: ownView(combat, 1),
       sights: sights(combat, 1).slice(0, this.players.length),
       events: this.forGuest.splice(0),
+      links: this.links.map(([from, to, kind]) => [from, to, LINK_KINDS.indexOf(kind)]),
       winner: combat.winner,
     })
   }
@@ -721,6 +727,13 @@ export class GuestSession extends Session {
         const event = readEvent(item, all)
         if (event) this.events.push(event)
       }
+    }
+    if (Array.isArray(msg.links)) {
+      this.links = msg.links.slice(0, 300).flatMap((item): Link[] => {
+        const [from, to, kind] = Array.isArray(item) ? item : []
+        const ok = (x: unknown) => Number.isInteger(x) && (x as number) >= 0 && (x as number) < all
+        return ok(from) && ok(to) && LINK_KINDS[kind] ? [[from, to, LINK_KINDS[kind]]] : []
+      })
     }
     if (!this.result) this.result = this.resultFor(msg.winner)
     this.worldAt = performance.now()

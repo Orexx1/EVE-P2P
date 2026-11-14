@@ -89,6 +89,29 @@ export interface ModuleStats {
   projects: boolean
   /** Why it cannot be used, for 'unsupported' modules. */
   note: string
+  /** How the module looks from outside while it runs, when its kind alone does not say (a painter and a dampener are both 'ewar'). */
+  look: LinkKind | ''
+}
+
+/**
+ * Something one thing in space is visibly doing to another, or to itself:
+ * a web, a neutralizer, a repair cycle. Anyone on grid can see these.
+ */
+export const LINK_KINDS = ['web', 'scram', 'point', 'neut', 'nos', 'ecm', 'paint', 'damp', 'track', 'armor', 'shield', 'hull'] as const
+export type LinkKind = (typeof LINK_KINDS)[number]
+/** From, to (the same as from when it acts on itself), and what. */
+export type Link = [number, number, LinkKind]
+
+const MODULE_LOOK: Partial<Record<ModuleKind, LinkKind>> = {
+  web: 'web',
+  scram: 'scram',
+  disrupt: 'point',
+  neut: 'neut',
+  nos: 'nos',
+  ecm: 'ecm',
+  armorRep: 'armor',
+  shieldBoost: 'shield',
+  hullRep: 'hull',
 }
 
 export function moduleStats(partial: Partial<ModuleStats> & Pick<ModuleStats, 'kind' | 'name'>): ModuleStats {
@@ -119,6 +142,7 @@ export function moduleStats(partial: Partial<ModuleStats> & Pick<ModuleStats, 'k
     affectsOwn: false,
     projects: false,
     note: '',
+    look: '',
     ...partial,
   }
 }
@@ -673,6 +697,36 @@ export class Combat {
       })
     })
     return strengths.length ? stacked(strengths) : 1
+  }
+
+  /** Everything that can be seen happening between ships right now: running modules, and what drones and fighters have on their targets. */
+  links(world: World): Link[] {
+    const seen = new Set<string>()
+    const links: Link[] = []
+    const add = (from: number, to: number, kind: LinkKind) => {
+      const key = `${from}:${to}:${kind}`
+      if (seen.has(key)) return
+      seen.add(key)
+      links.push([from, to, kind])
+    }
+    this.ships.forEach((ship, index) => {
+      if (ship.dead) return
+      this.stats[index].modules.forEach((m, i) => {
+        const run = ship.modules[i]
+        const kind = m.look || MODULE_LOOK[m.kind]
+        if (!run.on || !kind) return
+        if (run.target < 0) add(index, index, kind)
+        else if (this.present(run.target)) add(index, run.target, kind)
+      })
+      const run = this.runs[index]
+      if (!run || run.state !== 'engage' || !this.present(index) || !this.present(run.target)) return
+      const distance = dist(world.ships[index].pos, world.ships[run.target].pos)
+      this.craft[index]!.abilities.forEach((a, k) => {
+        if (!run.abilities[k].on || distance > a.range + 2 * a.falloff || (a.craftOnly && !this.craft[run.target])) return
+        if (a.kind === 'web' || a.kind === 'neut' || a.kind === 'ecm' || a.kind === 'point') add(index, run.target, a.kind)
+      })
+    })
+    return links
   }
 
   /** The electronic warfare drones and fighters have on `index` right now, as ability kinds. */

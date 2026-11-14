@@ -72,9 +72,9 @@ export class CameraRig {
     this.camera.updateProjectionMatrix()
   }
 
-  /** Brings poses and the camera up to date. Call once per frame, before drawing. */
-  update(ships: ShipView[]) {
-    const origin = (this.origin = ships[this.me].pos)
+  /** Brings poses and the camera up to date. Call once per frame, before drawing. The camera circles `lookAt` when given, otherwise the player's own ship. */
+  update(ships: ShipView[], lookAt?: Vec3) {
+    const origin = (this.origin = lookAt ?? ships[this.me].pos)
     ships.forEach((ship, i) => {
       this.offsets[i].set(ship.pos[0] - origin[0], ship.pos[1] - origin[1], ship.pos[2] - origin[2])
       const speed = Math.hypot(...ship.vel)

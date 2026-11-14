@@ -3,7 +3,12 @@
 // shots land, and a fireball when something dies. Drones and fighter squadrons
 // are drawn here too, as small markers. It only needs to know where things are
 // on screen, so it works the same over stand-in hulls and real models.
-import type { CombatEvent } from '../sim/combat'
+//
+// Modules that run between ships are drawn here as well, for as long as they
+// run: a web is a twisting ribbon, a neutralizer a jagged arc with charge
+// running down it, a painter a steady line with a crosshair on the target,
+// and a repair cycle a shimmer around the ship doing it.
+import type { CombatEvent, Link, LinkKind } from '../sim/combat'
 
 type Point = { x: number; y: number } | null
 
@@ -31,6 +36,28 @@ export const SIDE_ALLY = 1
 export const SIDE_ENEMY = 2
 const COLOURS = [MINE, ALLIES, THEIRS]
 
+/** Each effect has its own colour, whoever is using it, so it can be told at a glance. */
+const LINK_COLOUR: Record<LinkKind, string> = {
+  web: '#bfeaff',
+  scram: '#ff62d0',
+  point: '#b693ff',
+  neut: '#ff8a3d',
+  nos: '#9dff8a',
+  ecm: '#dfe9ff',
+  paint: '#ff4a4a',
+  damp: '#8fb6c9',
+  track: '#ffd84a',
+  armor: '#74f2a0',
+  shield: '#73c7ff',
+  hull: '#ffa25c',
+}
+const TAU = Math.PI * 2
+/** A repeatable scatter in 0..1, so a jagged arc holds its shape for a moment instead of boiling. */
+const scatter = (n: number) => {
+  const x = Math.sin(n * 127.1) * 43758.5453
+  return x - Math.floor(x)
+}
+
 /** A drone or squadron to mark on screen this frame. */
 export interface CraftMark {
   x: number
@@ -47,6 +74,8 @@ export class FireEffects {
   private effects: Effect[] = []
   private width = 0
   private height = 0
+  /** Seconds this view has been drawing, for effects that move. */
+  private clock = 0
 
   /** `sides[i]` is whose thing i is (mine, an ally's, the enemy's); `small[i]` is true for drones and squadrons. */
   constructor(
@@ -100,10 +129,225 @@ export class FireEffects {
     if (this.effects.length > 300) this.effects.splice(0, this.effects.length - 300)
   }
 
-  /** Draws one frame. `at` is where each ship, drone and squadron is on screen, or null when it is out of view or not in space. */
-  draw(at: Point[], dt: number, craft: CraftMark[] = []) {
+  /** Running modules, drawn between the ships they join or around the ship they act on. */
+  private drawLinks(at: Point[], links: Link[]) {
+    if (!links.length) return
     const ctx = this.ctx
+    const t = this.clock
+    ctx.save()
+    // Overlapping beams add up to a glow instead of covering each other.
+    ctx.globalCompositeOperation = 'lighter'
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    links.slice(0, 80).forEach(([from, to, kind], n) => {
+      const a = at[from]
+      const b = at[to]
+      if (!a || !b) return
+      const colour = LINK_COLOUR[kind]
+      ctx.strokeStyle = colour
+      ctx.fillStyle = colour
+      ctx.setLineDash([])
+      const dx = b.x - a.x
+      const dy = b.y - a.y
+      const length = Math.hypot(dx, dy)
+      const ux = length ? dx / length : 1
+      const uy = length ? dy / length : 0
+      // A point `s` of the way along, pushed `off` pixels to one side.
+      const along = (s: number, off = 0) => [a.x + dx * s - uy * off, a.y + dy * s + ux * off] as const
+      const path = (offset: (s: number, i: number) => number, steps = Math.max(8, Math.min(60, Math.round(length / 7)))) => {
+        ctx.beginPath()
+        for (let i = 0; i <= steps; i++) {
+          const s = i / steps
+          // Tapered, so every strand leaves the hull and arrives on the target.
+          const [x, y] = along(s, offset(s, i) * Math.sin(Math.PI * s))
+          if (i) ctx.lineTo(x, y)
+          else ctx.moveTo(x, y)
+        }
+        ctx.stroke()
+      }
+      const ring = (x: number, y: number, r: number, start = 0, sweep = TAU) => {
+        ctx.beginPath()
+        ctx.arc(x, y, Math.max(r, 0.5), start, start + sweep)
+        ctx.stroke()
+      }
+      const dots = (count: number, speed: number, r: number, toward = true) => {
+        for (let k = 0; k < count; k++) {
+          const s = (t * speed + k / count) % 1
+          const [x, y] = along(toward ? s : 1 - s)
+          ctx.beginPath()
+          ctx.arc(x, y, r, 0, TAU)
+          ctx.fill()
+        }
+      }
+      const beam = length > 10
+
+      switch (kind) {
+        case 'web': {
+          // Three strands winding round each other, and a net drawing closed on the target.
+          ctx.lineWidth = 1
+          ctx.globalAlpha = 0.7
+          if (beam) for (let k = 0; k < 3; k++) path((s) => 3.5 * Math.sin((s * length) / 6 - t * 6 + k * 2.1))
+          ctx.globalAlpha = 0.8
+          const r = 8 + 6 * (1 - ((t * 0.8) % 1))
+          for (let k = 0; k < 3; k++) ring(b.x, b.y, r, t * 1.5 + (k * TAU) / 3, 1.2)
+          break
+        }
+        case 'scram': {
+          // A tight double coil, and a cross held on the target's drive.
+          ctx.lineWidth = 1.2
+          ctx.globalAlpha = 0.8
+          if (beam) for (let k = 0; k < 2; k++) path((s) => 2.5 * Math.sin((s * length) / 2.4 - t * 10 + k * Math.PI))
+          const size = 5 + 1.5 * Math.sin(t * 8)
+          ctx.lineWidth = 1.6
+          ctx.beginPath()
+          ctx.moveTo(b.x - size, b.y - size)
+          ctx.lineTo(b.x + size, b.y + size)
+          ctx.moveTo(b.x + size, b.y - size)
+          ctx.lineTo(b.x - size, b.y + size)
+          ctx.stroke()
+          break
+        }
+        case 'point': {
+          // One steady line with pulses running down it, and a diamond on the target.
+          ctx.lineWidth = 1
+          ctx.globalAlpha = 0.45
+          if (beam) path(() => 0, 1)
+          ctx.globalAlpha = 0.9
+          if (beam) dots(3, 0.7, 1.6)
+          const size = 6 + 1.2 * Math.sin(t * 5)
+          ctx.beginPath()
+          ctx.moveTo(b.x, b.y - size)
+          ctx.lineTo(b.x + size, b.y)
+          ctx.lineTo(b.x, b.y + size)
+          ctx.lineTo(b.x - size, b.y)
+          ctx.closePath()
+          ctx.stroke()
+          break
+        }
+        case 'neut':
+        case 'nos': {
+          // A jagged arc that jumps to a new shape many times a second. A neutralizer pushes charge down it;
+          // a nosferatu pulls charge back up it.
+          const seed = Math.floor(t * 14) * 31 + n * 97
+          const jag = (_s: number, i: number) => (scatter(seed + i) - 0.5) * 11
+          if (beam) {
+            ctx.lineWidth = 2.2
+            ctx.globalAlpha = 0.45
+            path(jag, Math.max(4, Math.round(length / 16)))
+            ctx.lineWidth = 0.8
+            ctx.globalAlpha = 0.95
+            ctx.strokeStyle = '#fff'
+            path(jag, Math.max(4, Math.round(length / 16)))
+            ctx.fillStyle = kind === 'neut' ? '#ffd9a0' : '#e4ffc4'
+            ctx.globalAlpha = 0.9
+            dots(2, 1.1, 2.4, kind === 'neut')
+          }
+          ctx.strokeStyle = colour
+          ctx.lineWidth = 1.2
+          ctx.globalAlpha = 0.35 + 0.5 * scatter(seed)
+          ring(b.x, b.y, 9 + 3 * scatter(seed + 3))
+          break
+        }
+        case 'ecm': {
+          // Static: a broken, flickering line, and arcs of noise jumping round the target.
+          const seed = Math.floor(t * 20) + n * 53
+          ctx.lineWidth = 1
+          ctx.globalAlpha = 0.25 + 0.6 * scatter(seed)
+          ctx.setLineDash([2, 4 + 5 * scatter(seed + 1)])
+          ctx.lineDashOffset = -t * 60
+          if (beam) path(() => 0, 1)
+          ctx.setLineDash([])
+          ctx.globalAlpha = 0.75
+          for (let k = 0; k < 3; k++) ring(b.x, b.y, 7 + k * 4, scatter(seed + k * 7) * TAU, 0.6 + scatter(seed + k) * 1.4)
+          break
+        }
+        case 'paint': {
+          // A steady line, and a crosshair turning on the target.
+          ctx.lineWidth = 1
+          ctx.globalAlpha = 0.6
+          if (beam) path(() => 0, 1)
+          ctx.globalAlpha = 0.9
+          ring(b.x, b.y, 9)
+          ctx.beginPath()
+          for (let k = 0; k < 4; k++) {
+            const angle = t * 0.9 + (k * TAU) / 4
+            ctx.moveTo(b.x + Math.cos(angle) * 6, b.y + Math.sin(angle) * 6)
+            ctx.lineTo(b.x + Math.cos(angle) * 14, b.y + Math.sin(angle) * 14)
+          }
+          ctx.stroke()
+          break
+        }
+        case 'damp': {
+          // Dashes marching to the target, and a ring closing in on it.
+          ctx.lineWidth = 1.2
+          ctx.globalAlpha = 0.6
+          ctx.setLineDash([6, 6])
+          ctx.lineDashOffset = -t * 30
+          if (beam) path(() => 0, 1)
+          ctx.setLineDash([])
+          const phase = t % 1
+          ctx.globalAlpha = 0.2 + 0.7 * phase
+          ring(b.x, b.y, 17 - 9 * phase)
+          break
+        }
+        case 'track': {
+          // A square wave, and two brackets swinging wide of the target.
+          ctx.lineWidth = 1
+          ctx.globalAlpha = 0.7
+          if (beam) path((s) => 3 * Math.sign(Math.sin((s * length) / 5 - t * 9)))
+          const swing = 0.5 * Math.sin(t * 3)
+          ring(b.x, b.y, 11, swing - 0.5, 1)
+          ring(b.x, b.y, 11, swing + Math.PI - 0.5, 1)
+          break
+        }
+        case 'armor': {
+          // Plates knitting: a hexagon turning round the hull, and rings drawing in to it.
+          ctx.lineWidth = 1.2
+          ctx.globalAlpha = 0.55
+          ctx.beginPath()
+          for (let k = 0; k <= 6; k++) {
+            const angle = t * 0.6 + (k * TAU) / 6
+            const x = a.x + Math.cos(angle) * 17
+            const y = a.y + Math.sin(angle) * 17
+            if (k) ctx.lineTo(x, y)
+            else ctx.moveTo(x, y)
+          }
+          ctx.stroke()
+          const phase = (t * 1.2) % 1
+          ctx.globalAlpha = 0.6 * phase
+          ring(a.x, a.y, 26 - 12 * phase)
+          break
+        }
+        case 'shield': {
+          // A bubble: a faint ring with brighter arcs sliding round it.
+          ctx.lineWidth = 1
+          ctx.globalAlpha = 0.25
+          ring(a.x, a.y, 21)
+          ctx.lineWidth = 2
+          ctx.globalAlpha = 0.7
+          ring(a.x, a.y, 21, t * 2.2, 1)
+          ring(a.x, a.y, 21, t * 2.2 + Math.PI, 1)
+          break
+        }
+        case 'hull': {
+          // Four braces pulsing at the corners.
+          const r = 15 + 2 * Math.sin(t * 6)
+          ctx.lineWidth = 1.6
+          ctx.globalAlpha = 0.75
+          for (let k = 0; k < 4; k++) ring(a.x, a.y, r, (k * TAU) / 4 + 0.45, 0.65)
+          break
+        }
+      }
+    })
+    ctx.restore()
+  }
+
+  /** Draws one frame. `at` is where each ship, drone and squadron is on screen, or null when it is out of view or not in space. */
+  draw(at: Point[], dt: number, craft: CraftMark[] = [], links: Link[] = []) {
+    const ctx = this.ctx
+    this.clock += dt
     ctx.clearRect(0, 0, this.width, this.height)
+    this.drawLinks(at, links)
     // Drones are darts and squadrons are wider wedges, in their side's colour; one that is attacking is filled in.
     ctx.lineWidth = 1.25
     ctx.lineJoin = 'round'

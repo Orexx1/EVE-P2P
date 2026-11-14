@@ -5,7 +5,7 @@
 // is doing this to me from this far away" into a ShipStats.
 import { computeFit, isActivatableModule, type ComputedAttribute, type ComputedFit, type Fit, type FittingDataset, type ProjectedSource, type SdeEffect, type SdeType } from 'eve-fit-engine'
 import { allSkillsV, type LoadedFit } from '../fit/loadFit'
-import { abilityStats, craftStats, moduleStats, type AbilityStats, type CraftStats, type ModuleKind, type ModuleStats, type Quad, type ShipStats } from '../sim/combat'
+import { abilityStats, craftStats, moduleStats, type AbilityStats, type CraftStats, type LinkKind, type ModuleKind, type ModuleStats, type Quad, type ShipStats } from '../sim/combat'
 
 // Dogma effect ids that decide what a module does when activated.
 const EFFECT_KIND: Record<number, ModuleKind> = {
@@ -33,6 +33,8 @@ const EFFECT_KIND: Record<number, ModuleKind> = {
   6197: 'nos',
   6470: 'ecm',
 }
+/** What each kind of electronic warfare looks like from outside. */
+const EWAR_LOOK: Record<number, LinkKind> = { 6422: 'damp', 6423: 'track', 6424: 'track', 6425: 'paint' }
 const MWD_EFFECT = 6730
 const ANCILLARY_SHIELD_EFFECT = 4936
 const ANCILLARY_ARMOR_EFFECT = 5275
@@ -237,8 +239,9 @@ export function computeStats(own: Loadout, on: boolean[], projections: Projectio
         // The fitting engine applies a web to a ship; `amount` is for webbing a drone or a squadron, which it knows nothing about.
         return moduleStats({ ...base, ...timing, projects: true, amount: Math.abs(attr(A.speedFactor)) / 100 })
       case 'scram':
-      case 'ewar':
         return moduleStats({ ...base, ...timing, projects: true })
+      case 'ewar':
+        return moduleStats({ ...base, ...timing, projects: true, look: EWAR_LOOK[effect.id] ?? '' })
       case 'disrupt':
         return moduleStats({ ...base, ...timing })
       case 'neut':

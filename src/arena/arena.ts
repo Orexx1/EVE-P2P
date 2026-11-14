@@ -173,7 +173,9 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
       const alive = !diedAt[i] || now - diedAt[i] < 250
       return { ...ship, thrust: alive ? thrust(ship, session.players[i].spec.maxVelocity) : 0, alive }
     })
-    rig.update(views)
+    // The camera sits on the pilot's own ship unless they are looking at something else that is still there.
+    if (hud.focus !== session.me && (session.sights[hud.focus]?.dead || !all[hud.focus])) hud.focus = session.me
+    rig.update(views, hud.focus === session.me ? undefined : all[hud.focus].pos)
     view.render(views)
     // Drones and squadrons have no hull to draw yet: each is a marker where it is in space.
     const marks: CraftMark[] = []
@@ -190,7 +192,7 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
     })
     report.craft = marks.length
     fx.add(events)
-    fx.draw(at, dt, marks)
+    fx.draw(at, dt, marks, session.links)
     hud.report(events)
     hud.update(all, (i) => at[i], now)
   }

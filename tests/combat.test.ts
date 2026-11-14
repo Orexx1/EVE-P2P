@@ -561,6 +561,29 @@ describe('drones', () => {
     expect(duel.combat.ships[1].cap).toBeLessThan(duel.combat.stats[1].capMax - 5)
   })
 
+  it('shows what is running between ships, for anyone to see', () => {
+    const duel = new Duel('Rifter', 'Rifter')
+    duel.world.ships[0].order = { kind: 'approach', target: 1 }
+    duel.lock(0, 1)
+    duel.run(4)
+    expect(duel.combat.links(duel.world)).toEqual([])
+    for (const name of ['Webifier', 'Scrambler', 'Armor Repairer']) duel.cmd(0, { c: 'mod', i: duel.index(0, name), on: true })
+    duel.run(0.5)
+    // A module that acts on its own ship is a link from the ship to itself.
+    expect(duel.combat.links(duel.world)).toEqual(expect.arrayContaining([[0, 1, 'web'], [0, 1, 'scram'], [0, 0, 'armor']]))
+    expect(duel.combat.links(duel.world)).toHaveLength(3)
+
+    // Web drones show on their target while they are engaged on it, and stop when they are called off.
+    const ishtar = new Duel(ISHTAR, 'Rifter')
+    const webs = ishtar.craft(0).filter((i) => ishtar.combat.craft[i]!.name === 'Warrior SW-300')
+    ishtar.lock(0, 1)
+    ishtar.cmd(0, { c: 'craft', a: 'engage', ids: webs })
+    ishtar.run(5)
+    expect(ishtar.combat.links(ishtar.world)).toEqual(webs.map((i) => [i, 1, 'web']))
+    ishtar.cmd(0, { c: 'craft', a: 'orbit', ids: webs })
+    expect(ishtar.combat.links(ishtar.world)).toEqual([])
+  })
+
   it('takes smartbomb damage like anything else nearby', () => {
     const stats = (craft: ShipStats['craft'], modules: ShipStats['modules'] = []): ShipStats => ({
       maxVelocity: 0, mass: 1e6, agility: 1, signature: 100, hp: [1000, 1000, 1000],
