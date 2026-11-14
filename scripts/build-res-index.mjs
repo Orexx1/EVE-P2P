@@ -37,8 +37,22 @@ const { shards, entries } = buildShards(indexText, keep)
 console.log(`index: ${lines} lines, ${entries} kept, ${Object.keys(shards).length} shards`)
 if (entries < 10_000) throw new Error('index looks too small to be real')
 
-// One hull file to prove the whole chain after deploy (see verify-relay.mjs).
 const all = Object.values(shards).flatMap((s) => Object.keys(s))
+
+// Diagnostic mode: `--grep <regex>` lists matching paths and writes nothing.
+const grepAt = process.argv.indexOf('--grep')
+if (grepAt > 0) {
+  const pattern = new RegExp(process.argv[grepAt + 1], 'i')
+  const hits = all.filter((p) => pattern.test(p)).sort()
+  const byExt = {}
+  for (const p of hits) byExt[p.slice(p.lastIndexOf('.'))] = (byExt[p.slice(p.lastIndexOf('.'))] ?? 0) + 1
+  console.log(`${hits.length} paths match ${pattern}; by extension: ${JSON.stringify(byExt)}`)
+  const step = Math.max(1, Math.floor(hits.length / 60))
+  console.log(hits.filter((_, i) => i % step === 0).slice(0, 70).join('\n'))
+  process.exit(0)
+}
+
+// One hull file to prove the whole chain after deploy (see verify-relay.mjs).
 const sample = all.filter((p) => p.startsWith('dx9/model/ship/') && p.endsWith('.gr2')).sort()[0] ?? all[0]
 const byFolder = {}
 for (const p of all) byFolder[p.split('/')[0]] = (byFolder[p.split('/')[0]] ?? 0) + 1

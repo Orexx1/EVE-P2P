@@ -5,7 +5,7 @@ name: Model smoke test
 on:
   push:
     branches: [main]
-    paths: ['scripts/model-smoke/**', '.github/workflows/model-smoke.yml']
+    paths: ['scripts/model-smoke/**', 'scripts/build-res-index.mjs', '.github/workflows/model-smoke.yml']
   workflow_dispatch:
     inputs:
       dna:
@@ -26,6 +26,12 @@ jobs:
           git init -q /tmp/ccpwgl2
           git -C /tmp/ccpwgl2 fetch -q --depth 1 https://github.com/cppctamber/ccpwgl2 fa3c4dba1ecff5343a7e7349e3de7f970519df82
           git -C /tmp/ccpwgl2 checkout -q FETCH_HEAD
+      - name: Inspect the resource index
+        run: |
+          node scripts/build-res-index.mjs --grep 'quadv5|blit\.'
+          node scripts/build-res-index.mjs --grep '^graphics/effect[^/]*/managed/space/spaceobject/v5/quad/'
+          node scripts/build-res-index.mjs --grep '^graphics/[^/]+/' | head -3
+          node scripts/build-res-index.mjs --grep '^graphics/effect' | head -2
       - name: Install headless Chrome driver
         run: cd scripts/model-smoke && npm init -y >/dev/null && npm install --no-audit --no-fund puppeteer
       - name: Render a hull
