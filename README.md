@@ -12,15 +12,45 @@ the duel.
 | --- | --- | --- |
 | 1 | Paste a fit, see its real stats (defense, damage, capacitor, speed, targeting) | Done |
 | 2 | Room codes, peer-to-peer connection, 3D space view, ship movement, first HUD | Done |
-| 3 | Core combat: locking, turrets, missiles, reps, capacitor, reloads, module rack | Next |
-| 4 | Webs, scrams, neuts, electronic warfare | Planned |
-| 5 | Drones in space, overheating, boosters, implants, command bursts | Planned |
+| 3 | Core combat: locking, turrets, missiles, reps, capacitor, reloads, module rack | Done |
+| 4 | Webs, scrams, neuts, nosferatu, ECM, damps, tracking disruptors, painters | Done |
+| 5 | Real ship models in the fight view | Done, with stand-ins as the fallback |
+| 6 | Overheating, drones as targets, scripts, boosters, implants, command bursts | Planned |
 
-Fits are computed with every skill at level V. Drones are launched automatically up
-to the ship's bandwidth.
+Fits are computed with every skill at level V. Both ships start with every module
+off, as if they had just undocked.
 
-Ships are drawn as stand-in hull shapes sized by ship class. Real EVE hull models
-are not included: see "Ship models" below.
+### What the fight models
+
+- **Locking** by scan resolution and signature radius, lost beyond targeting range.
+- **Modules** cycle, use capacitor at the start of each cycle, and finish the
+  cycle in progress when switched off. Ammunition runs out and reloads.
+- **Turrets**: one roll per shot against tracking and falloff, with the game's
+  hit qualities from a glancing blow to a wrecking shot.
+- **Missiles** fly for their travel time and apply by explosion radius and
+  velocity against the target's signature and speed at impact.
+- **Damage** goes through shield, armor and hull with each layer's resists.
+  Shields and capacitor recharge along the game's curve.
+- **Tank**: armor repairers land at the end of a cycle, shield boosters at the
+  start. Ancillary boosters burn charges, ancillary repairers burn paste.
+- **Electronic warfare**: webs, scrams (which shut off microwarpdrives),
+  dampeners, tracking and guidance disruptors and painters change the target's
+  numbers through the fitting engine. Neutralizers and nosferatu move capacitor.
+  ECM rolls against sensor strength and breaks the lock.
+- **Stats follow the fit**: when a module switches on or off, the fitting engine
+  recomputes the ship with exactly what is running and what is being done to it.
+
+Not modelled yet, or simplified:
+
+- Overheating, scripts, boosters, implants and command bursts.
+- Drones fight as a flight: they take travel time to reach the target, hit by
+  their own tracking, and cannot keep up with a target faster than they are, but
+  they cannot be shot at and have no flight path of their own.
+- Remote repair and other modules that only make sense with a third ship can be
+  seen in the rack but not activated.
+- Ranges are measured centre to centre.
+- Orbit radius and speed are an approximation that still needs calibrating
+  against the game.
 
 On phones the fight view only runs in landscape. In portrait it shows a notice asking
 the player to turn the phone, and the fight does not start until both players are
@@ -49,24 +79,34 @@ to GitHub Pages (`.github/workflows/deploy.yml`): https://orexx1.github.io/EVE-P
   the engine package into `public/sde` before every dev run and build, so updating
   the game data is `npm update eve-fit-engine`.
 - `src/ui/` renders the readout and the room controls.
-- `src/sim/` is the flight model: deterministic, no browser APIs, covered by tests.
-  Ships accelerate toward a wanted velocity exponentially, with a time constant of
-  mass x inertia modifier / 1e6 seconds, which reproduces in-game align times.
+- `src/sim/` is the simulation: deterministic, no browser APIs, covered by tests.
+  `world.ts` is the flight model: ships accelerate toward a wanted velocity
+  exponentially, with a time constant of mass x inertia modifier / 1e6 seconds,
+  which reproduces in-game align times. `combat.ts` is locking, module cycles,
+  capacitor, damage and destruction.
 - `src/net/` opens a room over WebRTC using [PeerJS](https://peerjs.com/). Its free
   public broker introduces the two browsers; game traffic then flows directly
   between them.
 - `src/game/` is the session. The host's browser runs the simulation ten times a
-  second and sends snapshots; the guest sends orders. Each side computes both fits
-  locally from the pasted text.
-- `src/arena/` is the fight view: a three.js scene drawn relative to the player's
-  ship, and the HUD.
+  second and sends snapshots; the guest sends orders and commands, which the host
+  validates. Each pilot is sent their own ship in full and only the other ship's
+  shield, armor and hull. `loadout.ts` asks the fitting engine what each ship is
+  worth with the modules that are running and the hostile effects on it.
+- `src/arena/` is the fight view. `rig.ts` holds the camera and ship poses,
+  `scene.ts` draws stand-in hulls with three.js, `modelView.ts` draws the real
+  hulls, `fx.ts` draws weapon fire over either, and `hud.ts` is the interface.
 
 ## Ship models
 
-Real hull models are in progress: see `docs/ship-models.md`. A Cloudflare Worker
-(`worker/`) relays the game's files to the browser, and a CI smoke test already
-renders a real hull through it. The fight view still uses the stand-ins
-(`src/arena/scene.ts`, `makeHull`) until the model view replaces them.
+The fight starts on stand-in hulls and switches to the real EVE models once both
+have loaded. They are drawn by [ccpwgl2](https://github.com/cppctamber/ccpwgl2)
+(MIT), downloaded at build time by `scripts/fetch-ccpwgl2.mjs`, from game files
+relayed by a Cloudflare Worker (`worker/`). If the models cannot be loaded, or the
+device cannot draw them at a usable frame rate, the stand-ins stay. Players can
+also turn real models off on the fit page. Details, findings and the licence
+position are in `docs/ship-models.md`.
+
+Module icons come from CCP's image server.
 
 ## Licence
 

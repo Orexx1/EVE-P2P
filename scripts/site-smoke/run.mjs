@@ -65,8 +65,8 @@ try {
   await page.click('[data-act="solo"]')
   await page.waitForSelector('.arena .hud', { timeout: 30_000 })
   await sleep(1500)
-  // Close in and start shooting, so the pictures show a fight and not just a ship.
-  await page.select('.arena [data-el="orbitRange"]', '500')
+  // Get moving and lock up, so the pictures show a fight and not just a ship.
+  await page.select('.arena [data-el="orbitRange"]', '7500')
   await page.click('.arena [data-act="orbit"]')
   await page.click('.arena [data-el="lock"]')
   await shoot('standin')
@@ -89,7 +89,7 @@ try {
     await page.click(`.arena [data-mod="${mod}"]`)
   }
   // Let textures still streaming in land, and the fight develop.
-  await sleep(state === 'ready' ? 12_000 : 2000)
+  await sleep(state === 'ready' ? 8_000 : 2000)
   await shoot('fight')
   note(`hud: ${await page.evaluate(() => [document.querySelector('[data-el="layers"]')?.textContent, document.querySelector('[data-el="selRange"]')?.textContent, ...[...document.querySelectorAll('.combat-log li')].map((l) => l.textContent)].join(' | '))}`)
   if (state === 'ready') {

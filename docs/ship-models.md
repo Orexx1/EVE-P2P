@@ -1,7 +1,8 @@
 # Real ship models: findings and plan
 
-Status: decided to use real EVE hull models (2026-11-13). Not built yet. The fight
-view currently draws stand-in hulls (`src/arena/scene.ts`, `makeHull`).
+Status: real EVE hull models are in the fight view (2026-11-13). The fight starts
+on stand-in hulls (`src/arena/scene.ts`) and switches to the real ones
+(`src/arena/modelView.ts`) when both have loaded.
 
 ## What was found
 
@@ -79,17 +80,35 @@ Learned the hard way:
   (HTTP 403), so DX11 shaders cannot be taken from an old build.
 - The default camera sits inside the hull: call `tny.camera.FitToScreen(ship)`.
 
-Next, in order:
+Built since (2026-11-13):
 
-1. Run the smoke test several more times and on two or three other hulls to
-   measure how reliable shader translation is.
-2. **Type to model lookup** from the SDE (type -> graphic -> hull:faction:race),
-   generated at build time.
-3. **Swap the space view** to ccpwgl2 behind the same interface as
-   `src/arena/scene.ts` (`render`, `project`, `directionAt`, `resize`, `dispose`),
-   keeping the stand-in view as the fallback when a model fails to load. The
-   library (6 MB) and its two worker files must be served from the site.
-4. Try it on a real phone; decide on a low-quality path if it is too slow.
+- **Type to model table**: `src/data/shipModels.json`, all 430 ships, generated
+  from ESI by `scripts/build-ship-models.mjs` in the `Ship model table` workflow
+  (the sandbox cannot reach ESI) and committed. Rerun it after a patch adds ships.
+- **Library on the site**: `scripts/fetch-ccpwgl2.mjs` downloads the pinned,
+  hash-checked build into `public/vendor/ccpwgl2` before every dev run and build.
+- **The model view**: the engine is booted once per page on a canvas that waits
+  in a hidden holder between fights. It takes its view and projection matrices
+  from the same camera rig as the stand-in view (`src/arena/rig.ts`), so
+  brackets, double-tap headings and weapon effects line up in both. Hulls are
+  fetched without being added to the scene and only swapped in when both are
+  complete. A device that stays under 12 frames a second for five seconds goes
+  back to stand-ins and remembers the choice.
+- **Fight check in CI**: the `fight` job of the `Model smoke test` workflow
+  builds the site, flies a solo fight in headless Chrome, and prints screenshots
+  into its log in chunks (`SHOT[name][n]:`).
+
+Measured so far: the Rifter, Merlin, Caracal and Apocalypse hulls all drew, in
+9 of 10 CI runs. One early run drew no hull at all. In about a third of runs
+some secondary shaders (decals, booster glow, shield impact) fail to translate
+with "Carbon WebGL target is incomplete"; the hull still draws, without those
+details. The cause is not known.
+
+Next:
+
+1. Try it on real phones and decide whether the automatic fallback is enough.
+2. Find out why shader translation fails intermittently.
+3. Turrets on hulls and the game's own weapon effects, replacing the 2D tracers.
 
 ## Open risks
 

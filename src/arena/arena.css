@@ -437,11 +437,13 @@ html.in-arena {
   line-height: 1;
 }
 
+/* The icon covers the short name underneath, which only shows if the icon cannot load. */
 .mod-face img {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
+  background: #101820;
   pointer-events: none;
 }
 

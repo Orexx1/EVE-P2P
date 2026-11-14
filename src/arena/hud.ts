@@ -295,8 +295,8 @@ export class Hud {
     // Own ship.
     const layers = [0, 1, 2].map((i) => percent(own.hp[i], own.hpMax[i]))
     const cap = percent(own.cap, own.capMax)
-    ;['gShield', 'gArmor', 'gHull'].forEach((key, i) => this.el[key].setAttribute('stroke-dasharray', `${layers[i].toFixed(1)} 100`))
-    this.el.gCap.setAttribute('stroke-dasharray', `${cap.toFixed(1)} 100`)
+    ;['gShield', 'gArmor', 'gHull'].forEach((key, i) => (this.el[key].style.strokeDasharray = `${layers[i].toFixed(1)} 100`))
+    this.el.gCap.style.strokeDasharray = `${cap.toFixed(1)} 100`
     this.el.layers.innerHTML =
       `<span class="shield">${Math.round(layers[0])}%</span> <span class="armor">${Math.round(layers[1])}%</span> ` +
       `<span class="hull">${Math.round(layers[2])}%</span> <span class="cap">Cap ${Math.round(cap)}%</span>`
