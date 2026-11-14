@@ -1,0 +1,44 @@
+# Two browsers on the published site: one hosts a room, the other joins it by
+# its code. Run with nothing in the way, with the guest sent to the relay, and
+# with direct connections blocked as they are between many separate networks.
+name: Room smoke test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/net/**'
+      - 'worker/**'
+      - 'scripts/room-smoke/**'
+      - '.github/workflows/room-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  room:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [open, relay, blocked]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install headless Chrome driver
+        run: cd scripts/room-smoke && npm init -y >/dev/null && npm install --no-audit --no-fund puppeteer
+      # A push that changes the connection code also republishes the site; give that time to land.
+      - name: Wait for the published site
+        if: github.event_name == 'push'
+        run: sleep 120
+      - name: Host and join a room
+        run: mkdir -p /tmp/room-out && node scripts/room-smoke/run.mjs
+        env:
+          MODE: ${{ matrix.mode }}
+          OUT: /tmp/room-out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: room-smoke-${{ matrix.mode }}
+          path: /tmp/room-out
