@@ -1,0 +1,27 @@
+# Regenerates the ship type -> 3D model table from EVE's public API and prints
+# it in the log. Run after a game patch adds ships, then commit the result as
+# src/data/shipModels.json.
+name: Ship model table
+
+on:
+  push:
+    branches: [main]
+    paths: ['scripts/build-ship-models.mjs', '.github/workflows/ship-models.yml']
+  workflow_dispatch:
+
+jobs:
+  table:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: node scripts/build-ship-models.mjs /tmp/shipModels.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ship-models
+          path: /tmp/shipModels.json
