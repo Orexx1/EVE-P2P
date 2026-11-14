@@ -42,8 +42,9 @@ app.innerHTML = `
     <p>
       Free and open source under the GPL-3.0. Fitting math by
       <a href="https://github.com/capsuleers-app/capsuleers.fitting-engine">eve-fit-engine</a>, built on pyfa.
-      EVE Online and all related material are the property of their owner, used under the EVE Online
-      Developer License; this site is not affiliated with or endorsed by them.
+      "EVE", "EVE Online", "CCP" and all related logos and images are trademarks or registered trademarks
+      of CCP hf. &copy; CCP hf. All rights reserved. Game data is used under the EVE Online Developer License.
+      This site is not affiliated with or endorsed by CCP.
       <span id="data-build"></span>
     </p>
   </footer>`
