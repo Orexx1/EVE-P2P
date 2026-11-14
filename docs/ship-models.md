@@ -25,8 +25,11 @@ view currently draws stand-in hulls (`src/arena/scene.ts`, `makeHull`).
 
 1. **A resource proxy** (the one server-side piece). Given a `res:/` path it looks
    the file up in CCP's resource index, fetches it from CCP's content server,
-   adds CORS headers, and caches it. Options: a single PHP file on ordinary web
-   hosting, or a Cloudflare Worker.
+   adds CORS headers, and caches it. Decided: a Cloudflare Worker (`worker/`),
+   deployed by Cloudflare from this repo. The Worker only relays content-addressed
+   files (`/r/<aa>/<hash>`) for the sites in `ALLOWED_ORIGINS`; turning a `res:/`
+   path into that address is done on the site from an index built at deploy time
+   (not built yet).
 2. **Type to model mapping.** Ship type id -> graphic id -> model "DNA"
    (hull:faction:race), generated from the SDE at build time into `public/sde`.
 3. **A new space view on ccpwgl2** replacing the three.js one: scene, camera,
