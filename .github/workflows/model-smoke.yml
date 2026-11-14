@@ -5,11 +5,21 @@ name: Model smoke test
 on:
   push:
     branches: [main]
-    paths: ['scripts/model-smoke/**', 'scripts/build-res-index.mjs', 'worker/**', '.github/workflows/model-smoke.yml']
+    paths:
+      - 'scripts/model-smoke/**'
+      - 'scripts/site-smoke/**'
+      - 'scripts/build-res-index.mjs'
+      - 'scripts/fetch-ccpwgl2.mjs'
+      - 'src/arena/**'
+      - 'worker/**'
+      - '.github/workflows/model-smoke.yml'
   workflow_dispatch:
     inputs:
       dna:
-        description: Ship DNA (hull:faction:race)
+        description: Ship DNA (hull:faction:race) for the single-hull check
+        required: false
+      fit:
+        description: Sample fit for the fight check (0 Rifter, 1 Merlin, 2 Caracal)
         required: false
 
 jobs:
@@ -60,3 +70,28 @@ jobs:
         with:
           name: model-smoke
           path: /tmp/smoke-out
+
+  # The real thing: the built site, a solo fight, real hulls taking over from
+  # the stand-ins. Screenshots are printed into the log as base64.
+  fight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Install headless Chrome driver
+        run: cd scripts/site-smoke && npm init -y >/dev/null && npm install --no-audit --no-fund puppeteer
+      - name: Fly a solo fight with real models
+        run: node scripts/site-smoke/run.mjs "$PWD/dist" /tmp/fight-out
+        env:
+          FIT: ${{ inputs.fit }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fight-smoke
+          path: /tmp/fight-out

@@ -1,0 +1,108 @@
+// End-to-end check of the real fight view: serves the built site on
+// http://localhost:4173 (an origin the relay allows), starts a solo fight with
+// a sample fit in headless Chrome, waits for the real hulls to take over from
+// the stand-ins, and saves a screenshot.
+//
+//   node run.mjs <dist dir> <output dir>      FIT=<sample index, default 0>
+import { createReadStream, existsSync, statSync } from 'node:fs'
+import { mkdir, writeFile } from 'node:fs/promises'
+import http from 'node:http'
+import path from 'node:path'
+import puppeteer from 'puppeteer'
+
+const [distDir, outDir] = process.argv.slice(2)
+const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.woff2': 'font/woff2' }
+
+const server = http.createServer((req, res) => {
+  const rel = decodeURIComponent(new URL(req.url, 'http://x').pathname).replace(/^\/+/, '') || 'index.html'
+  const file = path.join(distDir, rel)
+  if (!file.startsWith(path.resolve(distDir)) || !existsSync(file) || !statSync(file).isFile()) return res.writeHead(404).end()
+  res.writeHead(200, { 'Content-Type': types[path.extname(file)] ?? 'application/octet-stream' })
+  createReadStream(file).pipe(res)
+})
+await new Promise((r) => server.listen(4173, r))
+
+const lines = []
+const note = (line) => {
+  lines.push(line)
+  console.log(line)
+}
+const browser = await puppeteer.launch({
+  args: ['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
+})
+const page = await browser.newPage()
+await page.setViewport({ width: 844, height: 390 })
+const hosts = {}
+const seen = new Map()
+page.on('console', (m) => {
+  // The library logs a lot; keep the first line of each distinct message.
+  const text = `console.${m.type()}: ${m.text().split('\n')[0].slice(0, 300)}`
+  seen.set(text, (seen.get(text) ?? 0) + 1)
+  if (seen.get(text) === 1) note(text)
+})
+page.on('pageerror', (e) => note(`pageerror: ${String(e.stack || e.message).slice(0, 800)}`))
+page.on('requestfailed', (r) => note(`request failed: ${r.url().slice(0, 200)} (${r.failure()?.errorText})`))
+page.on('response', (r) => {
+  const host = new URL(r.url()).host
+  hosts[host] = (hosts[host] ?? 0) + 1
+  if (r.status() >= 400) note(`HTTP ${r.status()}: ${r.url().slice(0, 220)}`)
+})
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+const shots = []
+const shoot = async (name) => {
+  await mkdir(outDir, { recursive: true })
+  await page.screenshot({ path: path.join(outDir, `${name}.png`) })
+  shots.push([name, await page.screenshot({ type: 'jpeg', quality: 60, encoding: 'base64' })])
+}
+
+let state = 'not started'
+try {
+  await page.goto('http://localhost:4173/')
+  await page.waitForFunction(() => !document.querySelector('#load')?.disabled, { timeout: 60_000 })
+  await page.click(`[data-sample="${process.env.FIT || 0}"]`)
+  await page.waitForSelector('.duel:not([hidden]) [data-act="solo"]', { timeout: 20_000 })
+  await page.click('[data-act="solo"]')
+  await page.waitForSelector('.arena .hud', { timeout: 30_000 })
+  await sleep(1500)
+  await page.click('.arena [data-act="orbit"]').catch(() => note('no orbit button'))
+  await shoot('standin')
+
+  const deadline = Date.now() + 240_000
+  let last = ''
+  while (Date.now() < deadline) {
+    const arena = await page.evaluate(() => window.__arena ?? {})
+    state = String(arena.models)
+    const loading = await page.evaluate(() => document.querySelector('[data-el="loading"]')?.textContent ?? '')
+    if (loading !== last) note(`hud: ${(last = loading)}`)
+    if (state !== 'loading') {
+      if (arena.error) note(`models error: ${arena.error}`)
+      break
+    }
+    await sleep(2000)
+  }
+  note(`models: ${state}`)
+  // Let textures still streaming in land, and the ship get moving.
+  await sleep(state === 'ready' ? 15_000 : 2000)
+  await shoot('fight')
+  if (state === 'ready') {
+    // Zoom out with the mouse wheel to see both ships and the backdrop.
+    await page.mouse.move(300, 150)
+    for (let i = 0; i < 6; i++) await page.mouse.wheel({ deltaY: 400 })
+    await sleep(3000)
+    await shoot('zoomed-out')
+  }
+} catch (err) {
+  note(`FAILED: ${err.stack || err}`)
+  await shoot('failure').catch(() => {})
+}
+note(`responses by host: ${JSON.stringify(hosts)}`)
+for (const [text, count] of seen) if (count > 1) note(`(x${count}) ${text}`)
+await mkdir(outDir, { recursive: true })
+await writeFile(path.join(outDir, 'log.txt'), lines.join('\n'))
+// The pictures, inline, for environments that can read the log but not artifacts.
+for (const [name, data] of shots) console.log(`SCREENSHOT_JPEG_BASE64[${name}]:${data}`)
+
+await browser.close()
+server.close()
+process.exit(state === 'ready' ? 0 : 1)

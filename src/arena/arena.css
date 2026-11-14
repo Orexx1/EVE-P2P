@@ -17,11 +17,35 @@ html.in-arena {
   overflow: hidden;
 }
 
-.arena canvas {
+.arena canvas,
+.arena .surface {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
   height: 100%;
+}
+
+/* Takes every drag, pinch and tap meant for space, whichever canvas is drawing. */
+.arena .surface {
   touch-action: none;
+}
+
+/* Where the real-model canvas waits between fights. It keeps a size so the
+   engine behind it never has to deal with an empty canvas. */
+.model-holder {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 320px;
+  height: 200px;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.model-holder canvas {
+  width: 100%;
+  height: 100%;
 }
 
 .arena button,

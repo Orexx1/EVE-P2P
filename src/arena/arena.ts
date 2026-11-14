@@ -3,8 +3,33 @@ import './arena.css'
 import type { Session } from '../game/session'
 import { add, scale } from '../sim/vec'
 import { timeConstant, wantedVelocity, type ShipState } from '../sim/world'
+import shipModels from '../data/shipModels.json'
 import { Hud } from './hud'
+import { CameraRig, type FightView, type ShipView } from './rig'
 import { SpaceView } from './scene'
+
+const MODELS_KEY = 'eve-p2p:real-models'
+
+/** Real ship models are on unless this device has turned them off (by choice or because they ran too slowly). */
+export function realModelsEnabled(): boolean {
+  try {
+    return localStorage.getItem(MODELS_KEY) !== 'off'
+  } catch {
+    return true
+  }
+}
+
+export function setRealModels(on: boolean) {
+  try {
+    if (on) localStorage.removeItem(MODELS_KEY)
+    else localStorage.setItem(MODELS_KEY, 'off')
+  } catch {
+    // No storage: the choice lasts for this fight only.
+  }
+}
+
+/** A small window for automated checks to see how the fight view is doing. */
+const report = (window as unknown as { __arena: Record<string, unknown> }).__arena ??= {}
 
 /** Phones must be held sideways: the interface does not fit a portrait screen. */
 function phoneInPortrait(): boolean {
@@ -16,7 +41,8 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
   const root = document.createElement('div')
   root.className = 'arena'
   root.innerHTML = `
-    <canvas></canvas>
+    <canvas class="standin"></canvas>
+    <div class="surface"></div>
     <div class="rotate" role="alert" hidden>
       <svg viewBox="0 0 64 64" aria-hidden="true">
         <rect x="22" y="8" width="20" height="36" rx="3" class="phone-from" />
@@ -30,10 +56,13 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
   document.body.append(root)
   document.documentElement.classList.add('in-arena')
 
-  const canvas = root.querySelector('canvas')!
+  const canvas = root.querySelector<HTMLCanvasElement>('canvas.standin')!
+  const surface = root.querySelector<HTMLDivElement>('.surface')!
   const rotate = root.querySelector<HTMLDivElement>('.rotate')!
   const lengths = session.players.map((p) => p.spec.radius * 2) as [number, number]
-  const view = new SpaceView(canvas, lengths, session.me)
+  const rig = new CameraRig(surface, lengths[session.me], session.me)
+  let standin: SpaceView | null = new SpaceView(canvas, lengths, rig)
+  let view: FightView = standin
   let closed = false
 
   const exit = (reason: string | null) => {
@@ -44,6 +73,8 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
     portrait.removeEventListener('change', layout)
     session.leave()
     view.dispose()
+    standin?.dispose()
+    rig.dispose()
     if (document.fullscreenElement) void document.exitFullscreen().catch(() => {})
     root.remove()
     document.documentElement.classList.remove('in-arena')
@@ -61,6 +92,7 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
     rotate.hidden = !blocked
     hud.root.hidden = blocked
     session.setReady(!blocked)
+    rig.resize(root.clientWidth, root.clientHeight)
     view.resize(root.clientWidth, root.clientHeight)
   }
   window.addEventListener('resize', layout)
@@ -70,12 +102,12 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
   // Double-click or double-tap empty space to fly in that direction.
   let lastTap = { time: 0, x: 0, y: 0 }
   let down = { x: 0, y: 0 }
-  canvas.addEventListener('pointerdown', (e) => (down = { x: e.clientX, y: e.clientY }))
-  canvas.addEventListener('pointerup', (e) => {
+  surface.addEventListener('pointerdown', (e) => (down = { x: e.clientX, y: e.clientY }))
+  surface.addEventListener('pointerup', (e) => {
     if (Math.hypot(e.clientX - down.x, e.clientY - down.y) > 8) return
     const now = performance.now()
     if (now - lastTap.time < 350 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 30) {
-      session.order({ kind: 'heading', dir: view.directionAt(e.clientX, e.clientY) })
+      session.order({ kind: 'heading', dir: rig.directionAt(e.clientX, e.clientY) })
       lastTap.time = 0
     } else {
       lastTap = { time: now, x: e.clientX, y: e.clientY }
@@ -105,13 +137,51 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
     if (!rotate.hidden) return
     const ahead = Math.min((now - session.worldAt) / 1000, 0.5)
     const ships: [ShipState, ShipState] = [predicted(0, ahead), predicted(1, ahead)]
-    view.render([
-      { ...ships[0], thrust: thrust(ships[0], session.players[0].spec.maxVelocity) },
-      { ...ships[1], thrust: thrust(ships[1], session.players[1].spec.maxVelocity) },
-    ])
-    hud.update(ships, view.project(session.them), now)
+    const views: [ShipView, ShipView] = [
+      { ...ships[0], thrust: thrust(ships[0], session.players[0].spec.maxVelocity), alive: true },
+      { ...ships[1], thrust: thrust(ships[1], session.players[1].spec.maxVelocity), alive: true },
+    ]
+    rig.update(views)
+    view.render(views)
+    hud.update(ships, rig.project(session.them), now)
   }
   frame = requestAnimationFrame(draw)
+
+  // Real hulls load in the background and take over from the stand-ins when
+  // both are ready. Any failure leaves the stand-ins in place.
+  const dnas = session.players.map((p) => (shipModels as Record<string, string>)[String(p.fit.fit.shipTypeID)])
+  report.models = 'off'
+  if (realModelsEnabled() && dnas[0] && dnas[1]) {
+    report.models = 'loading'
+    void import('./modelView')
+      .then(({ ModelView }) => ModelView.load(dnas as [string, string], rig, (percent) => hud.setLoading(percent)))
+      .then((models) => {
+        hud.setLoading(null)
+        if (closed) return
+        const backToStandins = (remember: boolean) => {
+          if (closed || view !== models) return
+          if (remember) setRealModels(false)
+          models.dispose()
+          canvas.hidden = false
+          view = standin = new SpaceView(canvas, lengths, rig)
+          layout()
+          report.models = 'too slow'
+        }
+        models.onSlow = () => backToStandins(true)
+        models.attach(root)
+        standin?.dispose()
+        standin = null
+        canvas.hidden = true
+        view = models
+        report.models = 'ready'
+      })
+      .catch((err) => {
+        hud.setLoading(null)
+        report.models = 'failed'
+        report.error = String(err instanceof Error ? err.message : err)
+        console.warn('Real ship models are unavailable; using stand-in hulls.', err)
+      })
+  }
 }
 
 function thrust(ship: ShipState, top: number): number {

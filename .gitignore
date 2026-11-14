@@ -7,3 +7,4 @@ public/sde
 public/ri
 scripts/model-smoke/node_modules
 scripts/model-smoke/package*.json
+public/vendor

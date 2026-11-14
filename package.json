@@ -7,9 +7,9 @@
   "type": "module",
   "scripts": {
     "sync-sde": "node scripts/sync-sde.mjs",
-    "predev": "node scripts/sync-sde.mjs",
+    "predev": "node scripts/sync-sde.mjs && node scripts/fetch-ccpwgl2.mjs",
     "dev": "vite",
-    "prebuild": "node scripts/sync-sde.mjs",
+    "prebuild": "node scripts/sync-sde.mjs && node scripts/fetch-ccpwgl2.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "pretest": "node scripts/sync-sde.mjs",

@@ -1,22 +1,9 @@
-// The 3D view of the fight. Everything is drawn relative to the player's own
-// ship, which sits at the origin: that keeps coordinates small (no jitter at
-// 100 km) and lets the camera simply orbit the origin.
-//
-// Hulls are original stand-in shapes sized by ship class. The view only needs
-// position, velocity and hull length per ship, so real models can replace
-// `makeHull` without touching the rest of the game.
+// The stand-in 3D view of the fight: original hull shapes sized by ship class.
+// It draws at once, on any device, and is what the fight falls back to when
+// the real ship models cannot be loaded (see modelView.ts).
 import * as THREE from 'three'
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import type { Vec3 } from '../sim/vec'
+import type { CameraRig, FightView, ShipView } from './rig'
 
-export interface ShipView {
-  pos: Vec3
-  vel: Vec3
-  /** 0..1, how hard the engines are burning. */
-  thrust: number
-}
-
-const FORWARD = new THREE.Vector3(0, 0, 1)
 const DUST_COUNT = 500
 
 function makeHull(length: number, engine: number): THREE.Group {
@@ -69,23 +56,20 @@ function makeStars(): THREE.Points {
   return new THREE.Points(geometry, new THREE.PointsMaterial({ size: 1.6, sizeAttenuation: false, vertexColors: true }))
 }
 
-export class SpaceView {
+export class SpaceView implements FightView {
   private renderer: THREE.WebGLRenderer
   private scene = new THREE.Scene()
-  private camera = new THREE.PerspectiveCamera(55, 1, 1, 1e7)
-  private controls: OrbitControls
   private hulls: [THREE.Group, THREE.Group]
   private dust: THREE.Points
   private dustBase: Float32Array
   private dustBox: number
-  private scratch = new THREE.Vector3()
-  private turn = new THREE.Quaternion()
 
   constructor(
-    private canvas: HTMLCanvasElement,
+    canvas: HTMLCanvasElement,
     lengths: [number, number],
-    private me: 0 | 1,
+    private rig: CameraRig,
   ) {
+    const me = rig.me
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     this.renderer.setClearColor(0x05080c)
@@ -96,7 +80,6 @@ export class SpaceView {
     this.scene.add(sun, new THREE.AmbientLight(0x6f86a8, 0.9))
 
     this.hulls = [makeHull(lengths[0], me === 0 ? 0x7fd0ff : 0xffa45c), makeHull(lengths[1], me === 1 ? 0x7fd0ff : 0xffa45c)]
-    this.hulls[1].quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI)
     this.scene.add(...this.hulls)
 
     // Drifting dust around the ship: the only thing that makes speed visible
@@ -113,34 +96,19 @@ export class SpaceView {
     )
     this.dust.frustumCulled = false
     this.scene.add(this.dust)
-
-    this.camera.position.set(own * 1.9, own * 1.2, -own * 2.6)
-    this.controls = new OrbitControls(this.camera, canvas)
-    this.controls.enablePan = false
-    this.controls.enableDamping = true
-    this.controls.dampingFactor = 0.12
-    this.controls.minDistance = own * 1.4
-    this.controls.maxDistance = 300_000
-    this.controls.zoomSpeed = 1.4
   }
 
   resize(width: number, height: number) {
     this.renderer.setSize(width, height, false)
-    this.camera.aspect = width / height
-    this.camera.updateProjectionMatrix()
   }
 
   render(ships: [ShipView, ShipView]) {
-    const origin = ships[this.me].pos
+    const origin = this.rig.origin
     ships.forEach((ship, i) => {
       const hull = this.hulls[i]
-      hull.position.set(ship.pos[0] - origin[0], ship.pos[1] - origin[1], ship.pos[2] - origin[2])
-      const speed = Math.hypot(...ship.vel)
-      if (speed > 1) {
-        this.scratch.set(ship.vel[0] / speed, ship.vel[1] / speed, ship.vel[2] / speed)
-        this.turn.setFromUnitVectors(FORWARD, this.scratch)
-        hull.quaternion.slerp(this.turn, 0.08)
-      }
+      hull.visible = ship.alive
+      hull.position.copy(this.rig.offsets[i])
+      hull.quaternion.copy(this.rig.turns[i])
       const engine = hull.getObjectByName('engine') as THREE.Mesh
       engine.scale.setScalar(0.4 + ship.thrust * 0.9)
     })
@@ -155,33 +123,10 @@ export class SpaceView {
     }
     out.needsUpdate = true
 
-    this.controls.update()
-    this.renderer.render(this.scene, this.camera)
-  }
-
-  /** Where a ship sits on screen, in CSS pixels, or null if it is behind the camera. */
-  project(index: 0 | 1): { x: number; y: number } | null {
-    this.scratch.copy(this.hulls[index].position).project(this.camera)
-    if (this.scratch.z > 1) return null
-    return {
-      x: ((this.scratch.x + 1) / 2) * this.canvas.clientWidth,
-      y: ((1 - this.scratch.y) / 2) * this.canvas.clientHeight,
-    }
-  }
-
-  /** The direction in space under a point on screen: where a double-tap sends the ship. */
-  directionAt(clientX: number, clientY: number): Vec3 {
-    const rect = this.canvas.getBoundingClientRect()
-    this.scratch
-      .set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1, 0.5)
-      .unproject(this.camera)
-      .sub(this.camera.position)
-      .normalize()
-    return [this.scratch.x, this.scratch.y, this.scratch.z]
+    this.renderer.render(this.scene, this.rig.camera)
   }
 
   dispose() {
-    this.controls.dispose()
     this.scene.traverse((object) => {
       const mesh = object as THREE.Mesh
       mesh.geometry?.dispose()

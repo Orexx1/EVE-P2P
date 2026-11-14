@@ -37,6 +37,7 @@ export class Hud {
         ${document.fullscreenEnabled ? '<button type="button" data-act="fullscreen">Full screen</button>' : ''}
         <span data-el="room">${session.roomCode ? `Room ${esc(session.roomCode)}` : 'Solo flight'}</span>
         <span data-el="clock"></span>
+        <span data-el="loading"></span>
       </div>
 
       <p class="hud-notice" data-el="notice" role="status"></p>
@@ -109,6 +110,11 @@ export class Hud {
       if (el === 'orbitRange' && kind === 'orbit') handlers.order({ kind: 'orbit', range: value })
       if (el === 'keepRange' && kind === 'keep') handlers.order({ kind: 'keep', range: value })
     })
+  }
+
+  /** Shows how far the real ship models have loaded; null hides it. */
+  setLoading(percent: number | null) {
+    this.el.loading.textContent = percent === null ? '' : `Loading ship models, ${percent}%`
   }
 
   private async fullscreen() {
