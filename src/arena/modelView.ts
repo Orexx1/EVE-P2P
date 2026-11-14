@@ -53,6 +53,15 @@ function getStage(): Promise<Stage> {
   return stage
 }
 
+// Starting the engine is the first half of the wait and a hull the second;
+// these let the loading notice count through both.
+let bootPercent = 0
+const bootWatchers = new Set<() => void>()
+const bootStep = (percent: number) => {
+  bootPercent = percent
+  bootWatchers.forEach((watcher) => watcher())
+}
+
 /** A hull that is loading or loaded, waiting to be used in a fight. */
 interface Pending {
   percent: number
@@ -64,10 +73,15 @@ const pool = new Map<string, Pending[]>()
 
 function fetchHull(dna: string): Pending {
   const pending: Pending = { percent: 0, listeners: new Set(), hull: null as unknown as Promise<any> }
-  const progress = (percent: number) => {
-    pending.percent = percent
-    pending.listeners.forEach((listener) => listener(percent))
+  let own = 0
+  const progress = (percent = own) => {
+    own = percent
+    pending.percent = percent >= 100 ? 100 : Math.round(bootPercent / 2 + percent / 2)
+    pending.listeners.forEach((listener) => listener(pending.percent))
   }
+  const watcher = () => progress()
+  bootWatchers.add(watcher)
+  progress()
   pending.hull = timed(
     `hull ${dna}`,
     getStage()
@@ -77,7 +91,8 @@ function fetchHull(dna: string): Pending {
         if (!hull) throw new Error('A hull did not load.')
         progress(100)
         return hull
-      }),
+      })
+      .finally(() => bootWatchers.delete(watcher)),
   )
   return pending
 }
@@ -128,7 +143,9 @@ function perspective(out: Float32Array | number[], aspect: number, near: number,
 }
 
 async function boot(): Promise<Stage> {
+  bootStep(5)
   await timed('library', loadScript(new URL(LIBRARY, document.baseURI).href))
+  bootStep(20)
   for (const [type, field] of EXTRA_FIELDS) {
     const cls = tw2.GetClass(type)
     if (cls) cls.blackReaders = { ...(cls.blackReaders || {}), [field]: (r: any) => r.ReadStringU16() }
@@ -183,7 +200,9 @@ async function boot(): Promise<Stage> {
   } catch {
     // Older builds of the library size the canvas on their own.
   }
+  bootStep(80)
   made.scene = await timed('backdrop', tny.FetchScene(BACKDROP))
+  bootStep(100)
   return made
 }
 
