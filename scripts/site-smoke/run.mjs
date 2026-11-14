@@ -93,7 +93,7 @@ try {
   while (Date.now() < deadline) {
     const arena = await page.evaluate(() => window.__arena ?? {})
     state = String(arena.models)
-    const notice = await page.evaluate(() => document.querySelector('[data-el="notice"]')?.textContent ?? '')
+    const notice = await page.evaluate(() => [...document.querySelectorAll('.boot li')].map((li) => `${li.className}:${li.firstElementChild.textContent} ${li.lastElementChild.textContent}`).join(' / '))
     if (notice !== last) note(`notice: ${(last = notice)}`)
     if (state !== 'loading') {
       if (arena.error) note(`models error: ${arena.error}`)

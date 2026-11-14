@@ -96,7 +96,9 @@ to GitHub Pages (`.github/workflows/deploy.yml`): https://orexx1.github.io/EVE-P
 - `src/data/` loads the game data snapshot. `scripts/sync-sde.mjs` copies it out of
   the engine package into `public/sde` before every dev run and build, so updating
   the game data is `npm update eve-fit-engine`.
-- `src/ui/` renders the readout and the room controls.
+- `src/ui/` renders the readout and the room controls. `src/theme.css` holds the
+  look: four signal colours (green yours and ready, red hostile, cyan allies,
+  amber working) and the bars of cells used wherever something is loading.
 - `src/sim/` is the simulation: deterministic, no browser APIs, covered by tests.
   `world.ts` is the flight model: ships accelerate toward a wanted velocity
   exponentially, with a time constant of mass x inertia modifier / 1e6 seconds,

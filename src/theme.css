@@ -1,0 +1,284 @@
+/* The look of the site, layered over the layout in styles.css.
+ *
+ * Four signal colours carry meaning everywhere, in the fit page and the fight:
+ *   green  yours, ready, running        red    hostile, destroyed, errors
+ *   cyan   allies, links, information   amber  working, waiting, warnings
+ * Shield, armor, hull and the damage types keep their own colours.
+ *
+ * One device recurs: a bar of cells that light up, like the cells of a ship's
+ * capacitor. It is used wherever something is loading.
+ */
+:root {
+  --bg: #0f1820;
+  --panel: #17222d;
+  --line: #2a3a4a;
+  --muted: #8fa1b2;
+  --go: #45e08a;
+  --go-dim: #1f6a45;
+  --hostile: #ff5a4d;
+  --friend: #5cc8f0;
+  --caution: #f2b84b;
+  --warn: var(--caution);
+}
+
+body {
+  /* A faint glow behind the page head: light from a station, off-screen. */
+  background:
+    radial-gradient(60rem 28rem at 15% -12rem, rgb(69 224 138 / 0.07), transparent 70%),
+    radial-gradient(48rem 26rem at 95% -10rem, rgb(92 200 240 / 0.06), transparent 70%),
+    var(--bg);
+  background-attachment: fixed;
+}
+
+::selection {
+  background: var(--go);
+  color: #06120b;
+}
+
+:focus-visible {
+  outline: 2px solid var(--go);
+  outline-offset: 2px;
+}
+
+/* Cells: a track of small blocks, with a fill that lights them left to right. */
+.cells {
+  display: block;
+  height: 0.5rem;
+  background: var(--line);
+  -webkit-mask: repeating-linear-gradient(90deg, #000 0 0.4375rem, transparent 0.4375rem 0.5625rem);
+  mask: repeating-linear-gradient(90deg, #000 0 0.4375rem, transparent 0.4375rem 0.5625rem);
+}
+
+.cells > span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--go);
+  transition: width 0.25s ease-out;
+}
+
+/* Page head */
+.site-head {
+  border-bottom: 0;
+  padding-bottom: 1rem;
+  /* The four signal colours, as a strip of cells under the title. */
+  background: linear-gradient(90deg, var(--go) 0 40%, var(--friend) 40% 62%, var(--caution) 62% 82%, var(--hostile) 82% 100%) bottom / 100% 3px no-repeat;
+  -webkit-mask: linear-gradient(#000, #000) top / 100% calc(100% - 3px) no-repeat,
+    repeating-linear-gradient(90deg, #000 0 0.875rem, transparent 0.875rem 1.125rem) bottom / 100% 3px no-repeat;
+  mask: linear-gradient(#000, #000) top / 100% calc(100% - 3px) no-repeat,
+    repeating-linear-gradient(90deg, #000 0 0.875rem, transparent 0.875rem 1.125rem) bottom / 100% 3px no-repeat;
+}
+
+.site-head h1 {
+  font-size: 1.75rem;
+  letter-spacing: 0.01em;
+}
+
+/* Buttons: green means go. Every button answers a press at once. */
+.actions button[type='submit'],
+.duel-row button,
+.roster button {
+  transition: background-color 0.1s, border-color 0.1s, color 0.1s, transform 0.06s;
+}
+
+.actions button[type='submit']:active,
+.duel-row button:active,
+.roster button:active {
+  transform: translateY(1px) scale(0.985);
+}
+
+.actions button[type='submit'],
+.duel-row button[data-act='create'] {
+  background: var(--go);
+  border: 1px solid var(--go);
+  color: #06120b;
+  box-shadow: 0 0 0 0 rgb(69 224 138 / 0);
+}
+
+.actions button[type='submit']:hover:not(:disabled),
+.duel-row button[data-act='create']:hover:not(:disabled) {
+  background: #6bf0a5;
+  border-color: #6bf0a5;
+  box-shadow: 0 0 1rem -0.25rem rgb(69 224 138 / 0.7);
+}
+
+.duel-row button {
+  border-color: var(--line);
+}
+
+.duel-row button:hover:not(:disabled) {
+  border-color: var(--friend);
+  color: #d7f3ff;
+}
+
+/* Fields */
+.entry textarea,
+.duel input,
+.gfx select {
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+
+.entry textarea:focus,
+.duel input:focus,
+.gfx select:focus {
+  outline: 0;
+  border-color: var(--go);
+  box-shadow: 0 0 0 3px rgb(69 224 138 / 0.18);
+}
+
+.duel label.check input,
+.gfx .gfx-check input {
+  accent-color: var(--go);
+}
+
+button.link {
+  color: var(--friend);
+  text-decoration-color: rgb(92 200 240 / 0.45);
+}
+
+button.link:hover {
+  color: #b9ecff;
+  text-decoration-color: currentColor;
+}
+
+/* Status lines: a lamp, then the words. Amber while working, red for trouble. */
+#status:not(:empty),
+.duel-status:not(:empty) {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+#status:not(:empty)::before,
+.duel-status:not(:empty)::before {
+  content: '';
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--caution);
+  box-shadow: 0 0 0.5rem var(--caution);
+  transform: translateY(-0.0625rem);
+}
+
+.duel-status {
+  color: var(--caution);
+}
+
+/* Game data loading: cells under the Load button. */
+.data-bar {
+  margin-top: 0.75rem;
+  max-width: 18rem;
+}
+
+.data-bar[hidden] {
+  display: none;
+}
+
+/* Sections */
+.duel {
+  border-top-color: var(--line);
+}
+
+.duel h2,
+.roster-sides h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.duel h2::before {
+  content: '';
+  width: 0.1875rem;
+  height: 1.125rem;
+  background: var(--go);
+  box-shadow: 0 0 0.625rem var(--go);
+}
+
+.roster summary,
+.gfx-fold summary {
+  transition: color 0.1s;
+}
+
+.roster summary:hover,
+.gfx-fold summary:hover {
+  color: var(--text);
+}
+
+.roster-sides > div:first-child h3 {
+  color: var(--friend);
+}
+
+.roster-sides > div:last-child h3 {
+  color: var(--hostile);
+}
+
+.roster button[data-team='0'] {
+  border-color: rgb(92 200 240 / 0.55);
+  color: #c9efff;
+}
+
+.roster button[data-team='0']:hover {
+  background: rgb(92 200 240 / 0.14);
+  border-color: var(--friend);
+}
+
+.roster button[data-team='1'] {
+  border-color: rgb(255 90 77 / 0.55);
+  color: #ffd2cc;
+}
+
+.roster button[data-team='1']:hover {
+  background: rgb(255 90 77 / 0.14);
+  border-color: var(--hostile);
+}
+
+.roster-name b {
+  color: var(--go);
+}
+
+/* The room code: the one thing on the page meant to be read across a room. */
+.room-code {
+  color: var(--go);
+  text-shadow: 0 0 1.25rem rgb(69 224 138 / 0.45);
+}
+
+.room .hint::before {
+  content: '';
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-right: 0.5rem;
+  border-radius: 50%;
+  background: var(--caution);
+  animation: lamp 1.2s ease-in-out infinite;
+}
+
+@keyframes lamp {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+/* Messages */
+.error {
+  border-left-color: var(--hostile);
+}
+
+.problems {
+  border-left-color: var(--caution);
+}
+
+.gfx-note,
+.roster-status {
+  color: var(--caution);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

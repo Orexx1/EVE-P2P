@@ -12,6 +12,7 @@ import { dist, len } from '../sim/vec'
 import { describeOrder, formatRange, type Order, type ShipState } from '../sim/world'
 import { esc, int } from '../ui/format'
 import { mountGraphicsPanel } from '../ui/graphics'
+import type { ModelProgress } from './modelView'
 
 const RANGES = [500, 1_000, 2_500, 5_000, 7_500, 10_000, 15_000, 20_000, 30_000]
 const LOG_LINES = 5
@@ -59,6 +60,12 @@ function moduleButton(m: ModuleStats, index: number): string {
     </button>`
 }
 
+/** What the fight is still waiting for before it starts. */
+export type LoadState = ({ mode: 'models' } & ModelProgress) | { mode: 'simple'; why?: string }
+
+/** A bar of cells that light up as a step completes, like the cells of a capacitor. */
+const cells = (key: string) => `<span class="cells" data-cells="${key}"><span></span></span>`
+
 export interface HudHandlers {
   order(order: Order): void
   command(command: Command): void
@@ -75,7 +82,8 @@ export class Hud {
   private taken = 0
   private dealt = 0
   private shownResult: Result | null = null
-  private loading: number | null = null
+  private load: LoadState = { mode: 'simple' }
+  private bootKey = ''
   private stopGraphics: (() => void) | null = null
 
   /** Call when the fight view closes. */
@@ -88,6 +96,7 @@ export class Hud {
   private brackets: HTMLButtonElement[] = []
   private rows: HTMLElement[] = []
   private targetsKey = ''
+  private orderButtons: Record<string, HTMLElement | null> = {}
 
   constructor(private session: Session, handlers: HudHandlers) {
     const me = session.players[session.me]
@@ -116,7 +125,11 @@ export class Hud {
 
       <section class="targets" data-el="targets" aria-label="Locked targets"></section>
 
-      <p class="hud-notice" data-el="notice" role="status"></p>
+      <section class="boot" data-el="boot" aria-label="Starting the fight" role="status">
+        <h2>Preparing the fight</h2>
+        <ol data-el="bootSteps"></ol>
+        <p class="boot-note" data-el="bootNote"></p>
+      </section>
 
       ${others
         .map(
@@ -129,7 +142,7 @@ export class Hud {
         .join('')}
 
       <aside class="hud-side">
-        <section class="panel" aria-label="Selected item">
+        <section class="panel" data-el="selPanel" aria-label="Selected item">
           <h2 data-el="selName"></h2>
           <p class="sub"><span data-el="selType"></span> <span data-el="selRange"></span></p>
           <div class="actions">
@@ -201,6 +214,7 @@ export class Hud {
     this.root.querySelectorAll<HTMLElement>('[data-count]').forEach((node) => (this.counts[Number(node.dataset.count)] = node))
     this.root.querySelectorAll<HTMLButtonElement>('[data-bracket]').forEach((node) => (this.brackets[Number(node.dataset.ship)] = node))
     this.root.querySelectorAll<HTMLElement>('[data-row]').forEach((node) => (this.rows[Number(node.dataset.ship)] = node))
+    for (const act of ['approach', 'orbit', 'keep']) this.orderButtons[act] = this.root.querySelector<HTMLElement>(`[data-act="${act}"]`)
     // The icon covers the short name; if CCP's image server cannot be reached the name shows instead.
     this.root.querySelectorAll<HTMLImageElement>('.mod img').forEach((img) => img.addEventListener('error', () => img.remove()))
 
@@ -258,11 +272,79 @@ export class Hud {
     })
   }
 
-  /** Shows how far the real ship models have loaded; null hides it. */
-  setLoading(percent: number | null) {
-    this.loading = percent
-    // Before the fight the notice in the middle carries it; this is for hulls that arrive late.
-    this.el.loading.textContent = percent === null || !this.session.started ? '' : `Loading ship models, ${percent}%`
+  /** Tells the start-up screen how loading is going. */
+  setLoad(state: LoadState) {
+    this.load = state
+    // Hulls that arrive after the fight has begun are reported in the top bar instead.
+    this.el.loading.textContent =
+      this.session.started && state.mode === 'models' && state.overall < 100 ? `Loading ship models, ${state.overall}%` : ''
+    this.drawBoot()
+  }
+
+  /**
+   * The start-up screen: each thing the fight needs, in the order it happens,
+   * with a bar that fills as it really completes.
+   */
+  private drawBoot() {
+    const s = this.session
+    if (s.started) return
+    const load = this.load
+    type Step = { key: string; label: string; detail: string; percent: number; state: 'done' | 'busy' | 'wait' | 'warn' }
+    const steps: Step[] = [
+      { key: 'fits', label: 'Fits computed', detail: `${s.players.length} ship${s.players.length === 1 ? '' : 's'}`, percent: 100, state: 'done' },
+      {
+        key: 'link',
+        label: s.via === 'relay' ? 'Linked through the relay' : s.via === 'direct' ? 'Linked directly' : 'Solo flight',
+        detail: s.roomCode ?? 'ready',
+        percent: 100,
+        state: 'done',
+      },
+    ]
+    if (load.mode === 'models') {
+      steps.push({ key: 'engine', label: 'Graphics engine', detail: `${Math.round(load.engine)}%`, percent: load.engine, state: load.engine >= 100 ? 'done' : 'busy' })
+      // One line per kind of ship, however many of it are in the fight.
+      const kinds = new Map<string, number[]>()
+      s.players.forEach((p, i) => kinds.set(p.fit.shipName, [...(kinds.get(p.fit.shipName) ?? []), load.hulls[i] ?? 0]))
+      for (const [name, parts] of kinds) {
+        const percent = parts.reduce((sum, v) => sum + v, 0) / parts.length
+        const waiting = load.engine < 100 && percent <= 0
+        steps.push({
+          key: `hull-${name}`,
+          label: `${name} hull${parts.length > 1 ? ` x${parts.length}` : ''}`,
+          detail: waiting ? 'queued' : `${Math.round(percent)}%`,
+          percent,
+          state: percent >= 100 ? 'done' : waiting ? 'wait' : 'busy',
+        })
+      }
+    } else {
+      steps.push({ key: 'ships', label: 'Simple ships', detail: load.why ? 'fallback' : 'ready', percent: 100, state: load.why ? 'warn' : 'done' })
+    }
+    const loaded = steps.every((step) => step.percent >= 100)
+    if (s.roomCode) {
+      const theirs = s.ready[s.them]
+      steps.push({
+        key: 'opponent',
+        label: theirs ? `${s.players[s.them].pilot} is ready` : `Waiting for ${s.players[s.them].pilot}`,
+        detail: theirs ? 'ready' : 'loading',
+        percent: theirs ? 100 : 0,
+        state: theirs ? 'done' : 'wait',
+      })
+    }
+
+    // The list is rebuilt only when its shape changes; otherwise just the bars move.
+    const key = steps.map((step) => step.key).join('|')
+    if (key !== this.bootKey) {
+      this.bootKey = key
+      this.el.bootSteps.innerHTML = steps.map((step) => `<li data-step="${esc(step.key)}"><span class="boot-label"></span>${cells(step.key)}<span class="boot-detail"></span></li>`).join('')
+    }
+    steps.forEach((step, i) => {
+      const row = this.el.bootSteps.children[i] as HTMLElement
+      row.className = step.state
+      ;(row.firstElementChild as HTMLElement).textContent = step.label
+      ;(row.lastElementChild as HTMLElement).textContent = step.detail
+      ;(row.querySelector('.cells > span') as HTMLElement).style.width = `${Math.max(0, Math.min(100, step.percent)).toFixed(0)}%`
+    })
+    this.el.bootNote.textContent = load.mode === 'simple' && load.why ? load.why : loaded ? 'All systems ready. Starting.' : 'The fight starts when everything is in.'
   }
 
   /** Adds what just happened to the combat log: only what this pilot did or had done to them, as in game. */
@@ -453,13 +535,16 @@ export class Hud {
     })
 
     const opponent = s.players[s.them].pilot
-    this.el.notice.textContent = s.started
-      ? ''
-      : this.loading !== null
-        ? `Loading ship models, ${this.loading}%. The fight starts when they are ready.`
-        : !s.ready[s.them]
-          ? `Waiting for ${opponent}. The fight starts when you are both ready.`
-          : 'Starting…'
+    // The start-up screen stays until the fight begins, then fades away.
+    if (!s.started) this.drawBoot()
+    this.el.boot.classList.toggle('gone', s.started)
+
+    // The button for what the ship is doing right now is lit.
+    const order = mine.order
+    for (const act of ['approach', 'orbit', 'keep']) {
+      this.orderButtons[act]?.classList.toggle('on', order.kind === act && 'target' in order && order.target === sel)
+    }
+    this.el.selPanel.className = `panel ${chosen?.team === s.myTeam ? 'ally' : 'enemy'}`
 
     if (s.result && s.result !== this.shownResult) {
       this.shownResult = s.result

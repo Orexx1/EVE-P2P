@@ -2,6 +2,7 @@ import '@fontsource/saira-semi-condensed/400.css'
 import '@fontsource/saira-semi-condensed/500.css'
 import '@fontsource/saira-semi-condensed/600.css'
 import './styles.css'
+import './theme.css'
 import type { FittingDataset } from 'eve-fit-engine'
 import { loadDataset } from './data/dataset'
 import { FitError, loadFit } from './fit/loadFit'
@@ -28,6 +29,7 @@ app.innerHTML = `
         <button type="submit" id="load" disabled>Load fit</button>
         <span id="status" role="status" aria-live="polite"></span>
       </div>
+      <span class="cells data-bar" id="dataBar" hidden><span></span></span>
       <p class="samples">
         Or start from a sample:
         ${SAMPLE_FITS.map((s, i) => `<button type="button" class="link" data-sample="${i}">${esc(s.label)}</button>`).join(' ')}
@@ -55,6 +57,9 @@ const loadButton = app.querySelector<HTMLButtonElement>('#load')!
 const status = app.querySelector<HTMLSpanElement>('#status')!
 const result = app.querySelector<HTMLDivElement>('#result')!
 const dataBuild = app.querySelector<HTMLSpanElement>('#data-build')!
+
+const dataBar = app.querySelector<HTMLElement>('#dataBar')!
+const dataFill = dataBar.firstElementChild as HTMLElement
 
 const lobby = createLobby(app.querySelector<HTMLDivElement>('#lobby')!)
 
@@ -93,6 +98,9 @@ function show() {
   }
 }
 
+// A pasted fit loads straight away: no second tap needed.
+textarea.addEventListener('paste', () => setTimeout(() => dataset && textarea.value.trim() && show()))
+
 form.addEventListener('submit', (event) => {
   event.preventDefault()
   show()
@@ -108,16 +116,21 @@ app.addEventListener('click', (event) => {
 
 async function start() {
   status.textContent = 'Loading game data…'
+  dataBar.hidden = false
+  dataFill.style.width = '0%'
   try {
     dataset = await loadDataset((done, total) => {
       status.textContent = `Loading game data, ${done} of ${total} files`
+      dataFill.style.width = `${(done / total) * 100}%`
     })
   } catch (err) {
     status.innerHTML = `${esc(err instanceof Error ? err.message : String(err))} <button type="button" class="link" id="retry">Try again</button>`
     status.querySelector('#retry')!.addEventListener('click', start, { once: true })
+    dataBar.hidden = true
     return
   }
   status.textContent = ''
+  dataBar.hidden = true
   dataBuild.textContent = `Game data build ${dataset.version}.`
   loadButton.disabled = false
   if (textarea.value.trim()) show()

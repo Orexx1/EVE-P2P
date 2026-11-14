@@ -65,7 +65,10 @@ const bootStep = (percent: number) => {
 
 /** A hull that is loading or loaded, waiting to be used in a fight. */
 interface Pending {
+  /** The whole wait, engine start-up included. */
   percent: number
+  /** This hull's own files. */
+  own: number
   listeners: Set<(percent: number) => void>
   hull: Promise<any>
 }
@@ -73,10 +76,11 @@ interface Pending {
 const pool = new Map<string, Pending[]>()
 
 function fetchHull(dna: string): Pending {
-  const pending: Pending = { percent: 0, listeners: new Set(), hull: null as unknown as Promise<any> }
+  const pending: Pending = { percent: 0, own: 0, listeners: new Set(), hull: null as unknown as Promise<any> }
   let own = 0
   const progress = (percent = own) => {
     own = percent
+    pending.own = percent
     pending.percent = percent >= 100 ? 100 : Math.round(bootPercent / 2 + percent / 2)
     pending.listeners.forEach((listener) => listener(pending.percent))
   }
@@ -216,6 +220,14 @@ async function boot(): Promise<Stage> {
   return made
 }
 
+/** How far along loading is, for the fight's start-up screen. All in percent. */
+export interface ModelProgress {
+  engine: number
+  /** One per ship, in ship order. */
+  hulls: number[]
+  overall: number
+}
+
 export class ModelView implements FightView {
   /** Called if the device cannot keep a usable frame rate with real models. */
   onSlow: (() => void) | null = null
@@ -232,9 +244,15 @@ export class ModelView implements FightView {
   ) {}
 
   /** Gets every hull, from the ones already warmed if possible. Rejects if any cannot be loaded. */
-  static async load(dnas: string[], rig: CameraRig, onProgress: (percent: number) => void): Promise<ModelView> {
+  static async load(dnas: string[], rig: CameraRig, onProgress: (progress: ModelProgress) => void): Promise<ModelView> {
     const pending = dnas.map(take)
-    const report = () => onProgress(Math.round(pending.reduce((sum, p) => sum + p.percent, 0) / pending.length))
+    const report = () =>
+      onProgress({
+        // A hull that is already in means the engine is too, whatever the counter last said.
+        engine: pending.some((p) => p.percent >= 100) ? 100 : bootPercent,
+        hulls: pending.map((p) => p.own),
+        overall: Math.round(pending.reduce((sum, p) => sum + p.percent, 0) / pending.length),
+      })
     pending.forEach((p) => p.listeners.add(report))
     report()
     try {
@@ -312,7 +330,7 @@ export class ModelView implements FightView {
       pool.set(this.dnas[i], list)
       if (list.length < 4) {
         hull.display = true
-        list.push({ percent: 100, listeners: new Set(), hull: Promise.resolve(hull) })
+        list.push({ percent: 100, own: 100, listeners: new Set(), hull: Promise.resolve(hull) })
       }
     })
     s.holder.append(s.canvas)

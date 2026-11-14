@@ -20,9 +20,9 @@ interface Effect {
   amount: number
 }
 
-const MINE = '#9fe0ff'
-const ALLIES = '#a6e8b0'
-const THEIRS = '#ffb070'
+const MINE = '#7dffa8'
+const ALLIES = '#8fd0ff'
+const THEIRS = '#ff7a5c'
 
 export class FireEffects {
   private ctx: CanvasRenderingContext2D

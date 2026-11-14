@@ -48,7 +48,7 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
   const lengths = session.players.map((p) => p.spec.radius * 2)
   const teams = session.players.map((p) => p.team)
   // Engine glow tells the sides apart on the stand-in hulls: yours, your allies', the enemy's.
-  const engines = teams.map((team, i) => (i === session.me ? 0x7fd0ff : team === session.myTeam ? 0x8fe39a : 0xffa45c))
+  const engines = teams.map((team, i) => (i === session.me ? 0x6dffa0 : team === session.myTeam ? 0x7fd0ff : 0xff6a52))
   const rig = new CameraRig(surface, lengths[session.me], session.me, teams)
   let standin: SpaceView | null = new SpaceView(canvas, lengths, rig, engines)
   let view: FightView = standin
@@ -60,6 +60,12 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
   const wantModels = getGraphics().models && dnas.every(Boolean)
   let settled = !wantModels
   canvas.hidden = !settled
+  // The start-up screen always gets a moment on screen, so it never just flickers past.
+  let bootShown = false
+  const bootTimer = setTimeout(() => {
+    bootShown = true
+    layout()
+  }, 900)
 
   const exit = (reason: string | null) => {
     if (closed) return
@@ -68,6 +74,7 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
     window.removeEventListener('resize', layout)
     portrait.removeEventListener('change', layout)
     clearTimeout(modelWait)
+    clearTimeout(bootTimer)
     hud.dispose()
     session.leave()
     view.dispose()
@@ -94,7 +101,7 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
     const blocked = phoneInPortrait()
     rotate.hidden = !blocked
     hud.root.hidden = blocked
-    session.setReady(!blocked && settled)
+    session.setReady(!blocked && settled && bootShown)
     rig.resize(root.clientWidth, root.clientHeight)
     view.resize(root.clientWidth, root.clientHeight)
     fx.resize(root.clientWidth, root.clientHeight)
@@ -174,21 +181,21 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
     if (settled || closed) return
     settled = true
     clearTimeout(modelWait)
-    hud.setLoading(null)
     layout()
   }
   const modelWait = setTimeout(() => {
     // Taking too long: start on stand-ins. The real hulls still take over if they arrive.
     if (view === standin) canvas.hidden = false
+    hud.setLoad({ mode: 'simple', why: 'Ship models are taking too long. Starting with simple ships.' })
     settle()
   }, MODEL_WAIT_MS)
 
   report.models = 'off'
   if (wantModels) {
     report.models = 'loading'
-    hud.setLoading(0)
+    hud.setLoad({ mode: 'models', engine: 0, hulls: dnas.map(() => 0), overall: 0 })
     void import('./modelView')
-      .then(({ ModelView }) => ModelView.load(dnas as string[], rig, (percent) => hud.setLoading(percent)))
+      .then(({ ModelView }) => ModelView.load(dnas as string[], rig, (progress) => hud.setLoad({ mode: 'models', ...progress })))
       .then((models) => {
         if (closed) return
         const backToStandins = (remember: boolean) => {
@@ -207,6 +214,7 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
         canvas.hidden = true
         view = models
         report.models = 'ready'
+        hud.setLoad({ mode: 'models', engine: 100, hulls: dnas.map(() => 100), overall: 100 })
         settle()
       })
       .catch((err) => {
@@ -214,10 +222,12 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
         report.error = String(err instanceof Error ? err.message : err)
         console.warn('Real ship models are unavailable; using stand-in hulls.', err)
         canvas.hidden = false
+        hud.setLoad({ mode: 'simple', why: 'Ship models could not be loaded. Using simple ships.' })
         settle()
       })
   } else {
     clearTimeout(modelWait)
+    hud.setLoad({ mode: 'simple' })
   }
 }
 

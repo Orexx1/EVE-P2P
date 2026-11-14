@@ -130,22 +130,112 @@ html.in-arena {
   background: rgb(27 38 50 / 0.9);
 }
 
-.hud-notice {
+/* The start-up screen: what the fight is waiting for, each with a bar of
+   cells that fills as it really completes. It fades out when the fight begins. */
+.boot {
   position: absolute;
-  top: 22%;
-  left: 50%;
-  transform: translateX(-50%);
-  max-width: 22rem;
-  padding: 0.5rem 0.875rem;
-  text-align: center;
-  background: rgb(20 29 39 / 0.92);
-  border: 1px solid var(--warn);
+  top: 50%;
+  left: calc((100% - 13.5rem) / 2);
+  transform: translate(-50%, -54%);
+  z-index: 1;
+  width: min(25rem, calc(100% - 15.5rem));
+  padding: 0.75rem 1rem 0.875rem;
+  background: rgb(13 21 29 / 0.94);
+  border: 1px solid var(--go-dim);
   border-radius: 4px;
+  box-shadow: 0 0 2.5rem -1rem rgb(69 224 138 / 0.55);
   pointer-events: none;
+  transition: opacity 0.45s ease, transform 0.45s ease;
 }
 
-.hud-notice:empty {
-  display: none;
+.boot.gone {
+  opacity: 0;
+  transform: translate(-50%, -62%) scale(0.98);
+}
+
+.hud .boot h2 {
+  color: var(--go);
+  font-size: 1rem;
+  letter-spacing: 0.02em;
+}
+
+.boot ol {
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.375rem;
+}
+
+.boot li {
+  display: grid;
+  grid-template-columns: minmax(0, 11rem) minmax(3rem, 1fr) 3.75rem;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.boot-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.boot-detail {
+  text-align: right;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.boot li.done .boot-label::before,
+.boot li.busy .boot-label::before,
+.boot li.wait .boot-label::before,
+.boot li.warn .boot-label::before {
+  content: '';
+  display: inline-block;
+  width: 0.4375rem;
+  height: 0.4375rem;
+  margin-right: 0.4375rem;
+  border-radius: 50%;
+  background: var(--go);
+  box-shadow: 0 0 0.375rem currentColor;
+  color: var(--go);
+}
+
+.boot li.busy .boot-label::before {
+  background: var(--caution);
+  color: var(--caution);
+  animation: pulse 0.7s steps(2) infinite;
+}
+
+.boot li.wait .boot-label::before {
+  background: var(--muted);
+  color: transparent;
+}
+
+.boot li.warn .boot-label::before {
+  background: var(--caution);
+  color: var(--caution);
+}
+
+.boot li.done .boot-detail {
+  color: var(--go);
+}
+
+.boot li.busy .cells > span {
+  background: var(--caution);
+}
+
+.boot li.warn .cells > span {
+  background: var(--caution);
+}
+
+.boot li.wait {
+  color: var(--muted);
+}
+
+.boot-note {
+  margin-top: 0.5rem;
+  color: var(--muted);
 }
 
 /* Bracket: the marker on a ship in space. The button is a 44px touch target
@@ -173,7 +263,11 @@ html.in-arena {
 }
 
 .bracket.ally .bracket-mark {
-  border-color: #8fd0ff;
+  border-color: var(--friend);
+}
+
+.bracket.enemy .bracket-mark {
+  border-color: #ff7a5c;
 }
 
 .bracket.selected .bracket-mark {
@@ -219,6 +313,40 @@ html.in-arena {
 .arena button.primary {
   border-color: var(--muted);
   font-weight: 600;
+}
+
+/* The selected item wears its side's colour; locking is a hostile act and looks it. */
+.hud-side .panel.enemy {
+  border-top: 2px solid var(--hostile);
+}
+
+.hud-side .panel.ally {
+  border-top: 2px solid var(--friend);
+}
+
+.hud-side .panel.enemy button.primary {
+  border-color: var(--hostile);
+  color: #ffd9d4;
+}
+
+.hud-side .panel.ally button.primary {
+  border-color: var(--friend);
+  color: #d4f2ff;
+}
+
+/* The order the ship is carrying out. */
+.arena .actions button.on {
+  border-color: var(--go);
+  color: var(--go);
+  box-shadow: inset 0 0 0.75rem -0.375rem var(--go);
+}
+
+.arena button {
+  transition: border-color 0.1s, background-color 0.1s, transform 0.06s;
+}
+
+.arena button:active {
+  transform: scale(0.97);
 }
 
 .panel {
@@ -420,7 +548,8 @@ html.in-arena {
   display: block;
   height: 100%;
   width: 0;
-  background: var(--text);
+  background: var(--go);
+  box-shadow: 0 0 0.5rem var(--go);
 }
 
 .layers {
@@ -655,11 +784,11 @@ html.in-arena {
 }
 
 .combat-log .dealt {
-  color: #9fe0ff;
+  color: #7dffa8;
 }
 
 .combat-log .taken {
-  color: #ffb070;
+  color: #ff8f7c;
 }
 
 .combat-log .miss {
@@ -692,11 +821,21 @@ html.in-arena {
 }
 
 .outcome.won {
-  border-color: #7fe08a;
+  border-color: var(--go);
+  box-shadow: 0 0 3rem -1rem var(--go);
+}
+
+.outcome.won h2 {
+  color: var(--go);
 }
 
 .outcome.lost {
-  border-color: #ff5a4d;
+  border-color: var(--hostile);
+  box-shadow: 0 0 3rem -1rem var(--hostile);
+}
+
+.outcome.lost h2 {
+  color: var(--hostile);
 }
 
 /* Rotate notice: shown instead of the fight on a phone held upright. */
@@ -728,7 +867,7 @@ html.in-arena {
 
 .rotate .phone-to,
 .rotate .turn {
-  stroke: var(--text);
+  stroke: var(--go);
 }
 
 .rotate h2 {
