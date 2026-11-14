@@ -24,8 +24,9 @@ the duel.
 | 7 | Extra ships on either side, flown by the computer | Done |
 | 8 | Drones and fighter squadrons as craft in space, with a drone window to command them | Done |
 | 9 | Fight screen laid out like the game's: status dial, target discs, sorted overview, order buttons, effects drawn between ships | Done |
-| 10 | Real models for drones and fighters, bombs and micro jump drives, repair drones | Planned |
-| 11 | Overheating, scripts, boosters, implants, command bursts | Planned |
+| 10 | Scenarios against the computer, alone or with a friend on the same side: challenges with set ships, sandboxes in your own | Done |
+| 11 | Real models for drones and fighters, bombs and micro jump drives, repair drones | Planned |
+| 12 | Overheating, scripts, boosters, implants, command bursts | Planned |
 
 Fits are computed with every skill at level V. Both ships start with every module
 off, as if they had just undocked.
@@ -40,6 +41,34 @@ also be added as an empty hull, which can be shot at but has nothing to shoot
 with. The computer flies the extras: each takes the nearest enemy, orbits inside
 its weapons' reach, locks, and runs its modules. The fight ends when one side
 has no ships left.
+
+### Scenarios
+
+Ready-made fights against the computer, on the front page under the fit. Each
+can be flown alone, or with a friend: "With a friend" opens a room, and whoever
+joins with the code flies on the same side.
+
+- **Challenges** set every ship, the players' included, so they play the same
+  for everyone and need no fit loaded. Flown alone, the computer flies the
+  second ship as a wingman. A friend joining a challenge needs no fit either.
+
+  | Challenge | You fly | Against |
+  | --- | --- | --- |
+  | Frigate brawl | Rifter, Merlin | Incursus, Kestrel |
+  | Hot drop | Vendetta, Hurricane | 2 Apocalypse, 2 Hurricane, 2 Drake, 2 Caracal |
+  | Outnumbered | Vexor, Vexor | Rifter, Merlin, Incursus, Tristan, Kestrel |
+  | Gate camp | Hurricane, Drake | Thorax, Rupture, Caracal, Incursus |
+  | Battlecruiser escort | Thorax, Caracal | Hurricane, Merlin |
+  | Under the guns | Rifter, Incursus | Apocalypse |
+
+- **Sandbox** scenarios set only the opposition. Each player flies whatever fit
+  they have loaded: a firing range of hulls that neither move nor shoot at 5,
+  10, 20 and 40 km, a frigate wolfpack, a cruiser gang, a drone cloud, three
+  heavy hitters, and a supercarrier.
+
+The scenarios and their fits are in `src/game/scenarios.ts`. A test loads every
+fit and checks it has no fitting problems, and plays each challenge through with
+the computer flying both sides.
 
 ### The fight screen
 

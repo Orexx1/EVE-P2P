@@ -156,6 +156,7 @@ async function start() {
   dataBar.hidden = true
   dataBuild.textContent = `Game data build ${dataset.version}.`
   loadButton.disabled = false
+  lobby.setData(dataset)
   if (textarea.value.trim()) show()
 }
 

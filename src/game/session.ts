@@ -35,7 +35,7 @@ import { createWorld, parseOrder, step, type Order, type ShipSpec, type World } 
 import { runBot } from './bots'
 import { buildLoadout, computeStats, projects, type Loadout, type Projection } from './loadout'
 
-const PROTOCOL = 4
+const PROTOCOL = 5
 const STEP_SECONDS = 0.1
 const MAX_EFT_LENGTH = 20_000
 const MAX_PILOT_LENGTH = 32
@@ -50,6 +50,24 @@ export interface Player {
   team: number
   /** Flown by the computer. */
   bot: boolean
+  /** How a computer pilot behaves: fights, flies but holds fire, or sits still as a target. */
+  behaviour: Behaviour
+  /** Where the ship starts, when the scenario says; otherwise it lines up with its team. */
+  at?: Vec3
+}
+
+export type Behaviour = 'fight' | 'passive' | 'still'
+
+/**
+ * What kind of fight the host has set up, told to the guest when they join:
+ * whether the two of them are on the same side, what it is called, and the
+ * ship the guest is to fly when the scenario sets one.
+ */
+export interface Setup {
+  coop: boolean
+  title: string
+  brief: string
+  guestEft?: string
 }
 
 /** An extra ship as the host set it up, before its fit is computed. */
@@ -57,6 +75,8 @@ export interface Extra {
   team: number
   pilot: string
   eft: string
+  behaviour?: Behaviour
+  at?: Vec3
 }
 
 export function specFor(fit: LoadedFit): ShipSpec {
@@ -74,11 +94,19 @@ export function cleanPilot(name: string): string {
   return name.replace(/\s+/g, ' ').trim().slice(0, MAX_PILOT_LENGTH) || 'Pilot'
 }
 
-export const playerFor = (pilot: string, fit: LoadedFit, team: number, bot: boolean): Player => ({ pilot, fit, spec: specFor(fit), team, bot })
+export const playerFor = (pilot: string, fit: LoadedFit, team: number, bot: boolean, behaviour: Behaviour = 'fight', at?: Vec3): Player => ({
+  pilot,
+  fit,
+  spec: specFor(fit),
+  team,
+  bot,
+  behaviour,
+  at,
+})
 
 /** Turns the host's list of extra ships into players. Throws a FitError if one cannot be read. */
 export function loadExtras(extras: Extra[], dataset: FittingDataset): Player[] {
-  return extras.map((extra) => playerFor(cleanPilot(extra.pilot), loadFit(extra.eft, dataset), extra.team === 0 ? 0 : 1, true))
+  return extras.map((extra) => playerFor(cleanPilot(extra.pilot), loadFit(extra.eft, dataset), extra.team === 0 ? 0 : 1, true, extra.behaviour, extra.at))
 }
 
 function readExtras(raw: unknown): Extra[] | null {
@@ -92,18 +120,39 @@ function readExtras(raw: unknown): Extra[] | null {
   return extras
 }
 
+function readSetup(raw: unknown): Setup | null {
+  if (!raw || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  const text = (x: unknown, max: number) => (typeof x === 'string' ? x.slice(0, max) : '')
+  const guestEft = typeof o.guestEft === 'string' && o.guestEft.length <= MAX_EFT_LENGTH ? o.guestEft : undefined
+  return { coop: o.coop === true, title: text(o.title, 80), brief: text(o.brief, 400), guestEft }
+}
+
+export interface Shake {
+  pilot: string
+  /** The other player's ship. */
+  fit: LoadedFit
+  extras: Player[]
+  /** What the host set up; null for a plain duel. Only the guest is told. */
+  setup: Setup | null
+  /** The ship the scenario gives this player to fly, when it sets one. */
+  own: LoadedFit | null
+}
+
 /**
  * Swaps fits with the other player. The host also sends the extra ships it
- * added. Rejects if anything received cannot be read.
+ * added and, with `setup`, what kind of fight this is. A scenario that sets
+ * the guest's ship overrides whatever fit the guest has loaded, so a guest
+ * can join one with no fit at all. Rejects if anything received cannot be read.
  */
 export function handshake(
   channel: Channel,
-  mine: { pilot: string; eft: string; extras?: Extra[] },
+  mine: { pilot: string; eft: string; extras?: Extra[]; setup?: Setup },
   dataset: FittingDataset,
-): Promise<{ pilot: string; fit: LoadedFit; extras: Player[] }> {
+): Promise<Shake> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => finish(new Error('The other player did not respond.')), 15_000)
-    const finish = (result: Error | { pilot: string; fit: LoadedFit; extras: Player[] }) => {
+    const finish = (result: Error | Shake) => {
       clearTimeout(timer)
       channel.onMessage = null
       channel.onClose = null
@@ -128,15 +177,39 @@ export function handshake(
       if (typeof msg.eft !== 'string' || msg.eft.length > MAX_EFT_LENGTH || typeof msg.pilot !== 'string' || !extras) {
         return finish(new Error('The other player sent a fit that could not be read.'))
       }
+      const setup = readSetup(msg.setup)
+      // Whichever side set the scenario up, a ship it gives the guest is the ship the guest flies.
+      const given = mine.setup?.guestEft ?? setup?.guestEft
+      if (!given && !msg.eft.trim()) {
+        channel.send({ t: 'reject', reason: 'this fight is flown in your own ship. Load a fit first, then join again.' })
+        return finish(new Error('The other player has no fit loaded. This fight needs one.'))
+      }
+      if (!given && !mine.eft.trim()) {
+        return finish(new Error('This fight is flown in your own ship. Load a fit first, then join again.'))
+      }
       try {
-        finish({ pilot: cleanPilot(msg.pilot), fit: loadFit(msg.eft, dataset), extras: loadExtras(extras, dataset) })
+        const hosting = !!mine.setup
+        finish({
+          pilot: cleanPilot(msg.pilot),
+          fit: loadFit(hosting && given ? given : msg.eft, dataset),
+          extras: loadExtras(extras, dataset),
+          setup,
+          own: !hosting && given ? loadFit(given, dataset) : null,
+        })
       } catch (err) {
         const reason = err instanceof FitError ? err.message : 'unreadable fit'
         channel.send({ t: 'reject', reason })
         finish(new Error(`A fit from the other player could not be loaded: ${reason}`))
       }
     }
-    channel.send({ t: 'hello', v: PROTOCOL, pilot: mine.pilot, eft: mine.eft, extras: mine.extras ?? [] })
+    channel.send({
+      t: 'hello',
+      v: PROTOCOL,
+      pilot: mine.pilot,
+      eft: mine.eft,
+      extras: (mine.extras ?? []).map(({ team, pilot, eft }) => ({ team, pilot, eft })),
+      setup: mine.setup,
+    })
   })
 }
 
@@ -391,6 +464,9 @@ export abstract class Session {
   result: Result | null = null
   /** Things that happened, waiting for the interface to show them. */
   events: CombatEvent[] = []
+  /** The scenario being flown and its briefing, when there is one. */
+  title = ''
+  brief = ''
   /** How the two players are connected; null when flying solo. */
   via: Channel['via'] | null = null
   /** What can be seen happening between ships right now: webs, neutralizers, repairs and the like. */
@@ -406,6 +482,9 @@ export abstract class Session {
       15_000,
       players.map((p) => p.team),
     )
+    players.forEach((player, index) => {
+      if (player.at) this.world.ships[index].pos = [...player.at]
+    })
   }
 
   /** The other pilot: the guest for the host, the host for the guest. */
@@ -462,15 +541,14 @@ export class HostSession extends Session {
   private forGuest: CombatEvent[] = []
 
   /**
-   * Pass no channel to fly solo: ship 1 is then a practice target, which only
-   * fights back when `sparring` is on. Extra ships always fight.
+   * Pass no channel to fly solo. Every ship flown by the computer does what
+   * its `behaviour` says.
    */
   constructor(
     players: Player[],
     private channel: Channel | null,
     roomCode: string | null,
     dataset: FittingDataset,
-    private sparring = true,
   ) {
     super(0, players, roomCode)
     this.loadouts = players.map((p) => buildLoadout(p.fit, dataset, p.spec.radius))
@@ -487,7 +565,7 @@ export class HostSession extends Session {
       channel.onMessage = (raw) => this.receive(raw)
       channel.onClose = () => {
         this.stop()
-        this.end('Your opponent disconnected.')
+        this.end('The other player disconnected.')
       }
     } else {
       this.ready[1] = true
@@ -599,8 +677,8 @@ export class HostSession extends Session {
       if (this.sinceBots >= 0.5) {
         this.sinceBots = 0
         this.players.forEach((player, index) => {
-          // The solo practice target can be told to hold fire; extras always fight.
-          if (player.bot) runBot(this.combat, this.world, index, index !== 1 || this.sparring)
+          // A target dummy does nothing at all; a passive ship flies but holds fire.
+          if (player.bot && player.behaviour !== 'still') runBot(this.combat, this.world, index, player.behaviour !== 'passive')
         })
       }
       this.refresh(STEP_SECONDS)
@@ -681,7 +759,7 @@ export class GuestSession extends Session {
     players.forEach((player, index) => applyNav(player.spec, combat.stats[index]))
     this.via = channel.via
     channel.onMessage = (raw) => this.receive(raw)
-    channel.onClose = () => this.end('Your opponent disconnected.')
+    channel.onClose = () => this.end('The other player disconnected.')
   }
 
   private receive(raw: unknown) {

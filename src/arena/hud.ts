@@ -274,7 +274,7 @@ export class Hud {
         <button type="button" data-act="leave">Leave</button>
         ${document.fullscreenEnabled ? '<button type="button" data-act="fullscreen">Full screen</button>' : ''}
         <button type="button" data-act="graphics" aria-expanded="false" data-el="gfxButton">Graphics</button>
-        <span data-el="room">${session.roomCode ? `Room ${esc(session.roomCode)}${session.via === 'relay' ? ', relayed' : ''}` : 'Solo flight'}</span>
+        <span data-el="room">${session.title ? `${esc(session.title)}, ` : ''}${session.roomCode ? `${session.title ? 'room' : 'Room'} ${esc(session.roomCode)}${session.via === 'relay' ? ', relayed' : ''}` : session.title ? 'solo' : 'Solo flight'}</span>
         <span data-el="clock"></span>
         <span data-el="loading"></span>
       </div>
@@ -284,7 +284,8 @@ export class Hud {
       <section class="targets" data-el="targets" aria-label="Locked targets"></section>
 
       <section class="boot" data-el="boot" aria-label="Starting the fight" role="status">
-        <h2>Preparing the fight</h2>
+        <h2>${esc(session.title || 'Preparing the fight')}</h2>
+        ${session.brief ? `<p class="boot-brief">${esc(session.brief)}</p>` : ''}
         <ol data-el="bootSteps"></ol>
         <p class="boot-note" data-el="bootNote"></p>
       </section>

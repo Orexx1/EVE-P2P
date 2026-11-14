@@ -240,6 +240,103 @@ button.link {
   accent-color: var(--text);
 }
 
+.duel h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 1.5rem 0 0.25rem;
+}
+
+.own-fit h3 {
+  margin-top: 1rem;
+}
+
+/* Scenarios: a card each, saying who flies what against what. */
+.scenario-kind {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.5rem;
+  margin: 1rem 0 0.5rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.scenarios {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr));
+  gap: 0.625rem;
+}
+
+.scenario {
+  display: grid;
+  grid-template-rows: auto 1fr auto auto;
+  gap: 0.375rem;
+  padding: 0.75rem 0.875rem 0.875rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--go-dim);
+  border-radius: 4px;
+}
+
+.scenario-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.scenario h4 {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+/* Difficulty: one to three lit bars. */
+.pips {
+  display: flex;
+  gap: 3px;
+}
+
+.pips i {
+  width: 0.3125rem;
+  height: 0.875rem;
+  background: var(--line);
+}
+
+.pips i.on {
+  background: var(--caution);
+}
+
+.scenario-brief {
+  font-size: 0.875rem;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.scenario-sides {
+  font-size: 0.875rem;
+  line-height: 1.35;
+}
+
+.scenario-sides .you {
+  color: var(--go);
+}
+
+.scenario-sides .them {
+  color: #ff9c86;
+}
+
+.scenario .duel-row {
+  margin-top: 0.25rem;
+}
+
+.scenario .duel-row button {
+  padding: 0.4375rem 0.5rem;
+  font-size: 0.9375rem;
+}
+
 .duel-row {
   display: flex;
   gap: 0.5rem;

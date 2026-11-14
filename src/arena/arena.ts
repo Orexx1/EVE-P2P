@@ -62,10 +62,14 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
   canvas.hidden = !settled
   // The start-up screen always gets a moment on screen, so it never just flickers past.
   let bootShown = false
-  const bootTimer = setTimeout(() => {
-    bootShown = true
-    layout()
-  }, 900)
+  // A scenario's briefing gets long enough to be read.
+  const bootTimer = setTimeout(
+    () => {
+      bootShown = true
+      layout()
+    },
+    session.brief ? 4_500 : 900,
+  )
 
   const exit = (reason: string | null) => {
     if (closed) return

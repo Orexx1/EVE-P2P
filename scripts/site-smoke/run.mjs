@@ -65,12 +65,14 @@ let state = 'not started'
 try {
   await page.goto('http://localhost:4173/')
   await page.waitForFunction(() => !document.querySelector('#load')?.disabled, { timeout: 60_000 })
+  // SCENARIO=<id> flies a ready-made scenario alone instead of a fit against extra ships.
+  const scenario = process.env.SCENARIO || ''
   await page.click(`[data-sample="${process.env.FIT || 0}"]`)
   await page.waitForSelector('.duel:not([hidden]) [data-act="solo"]', { timeout: 20_000 })
   // A target that does not shoot back, so the ship is still there for the pictures.
   await page.click('#spar')
   // EXTRAS="merlin:0,caracal:1" adds ships through the picker: search text, then 0 for an ally or 1 for an enemy.
-  const extras = (process.env.EXTRAS ?? 'merlin:0,caracal:1').split(',').filter(Boolean)
+  const extras = scenario ? [] : (process.env.EXTRAS ?? 'merlin:0,caracal:1').split(',').filter(Boolean)
   if (extras.length) {
     await page.click('.roster summary')
     for (const extra of extras) {
@@ -82,7 +84,8 @@ try {
     }
     note(`extra ships: allies [${await page.$eval('[data-el="team0"]', (e) => e.textContent.trim().replace(/\s+/g, ' '))}] enemies [${await page.$eval('[data-el="team1"]', (e) => e.textContent.trim().replace(/\s+/g, ' '))}]`)
   }
-  await page.click('[data-act="solo"]')
+  if (scenario) note(`scenario: ${await page.$eval(`[data-scenario="${scenario}"]`, (e) => e.textContent.trim().replace(/\s+/g, ' '))}`)
+  await page.click(scenario ? `[data-scenario="${scenario}"] [data-act="scenario-solo"]` : '[data-act="solo"]')
   await page.waitForSelector('.arena .hud', { timeout: 30_000 })
   const opened = Date.now()
   await shoot('loading')
