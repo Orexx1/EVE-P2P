@@ -26,6 +26,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      # Game resource index for the model relay. If the content servers are
+      # unreachable the site still deploys, just without a fresh index.
+      - name: Build resource index
+        run: node scripts/build-res-index.mjs
+        continue-on-error: true
       - run: npm run build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
@@ -41,3 +46,15 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # Proves the model pipeline end to end: index on the site, relay on Cloudflare,
+  # file from the game's content server.
+  verify-relay:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/verify-relay.mjs

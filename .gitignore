@@ -4,3 +4,4 @@ public/sde
 *.log
 .DS_Store
 .wrangler
+public/ri

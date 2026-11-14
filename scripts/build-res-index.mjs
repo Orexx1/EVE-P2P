@@ -1,0 +1,51 @@
+// Downloads the live game client's resource index and writes it to public/ri as
+// small JSON shards the relay can look paths up in. Runs in GitHub Actions: the
+// content servers are not reachable from every development environment.
+//
+// Chain: eveclient_TQ.json names the current build; that build's file list
+// names the address of resfileindex.txt; that file lists every resource.
+import { mkdir, rm, writeFile } from 'node:fs/promises'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { buildShards } from '../shared/resShard.js'
+
+const BINARIES = 'https://binaries.eveonline.com/'
+const out = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public', 'ri')
+
+// Sound and video are large and the fight view does not play them.
+const keep = (p) => !p.startsWith('audio/') && !p.startsWith('video/') && !/\.(wem|bnk|webm|bik|mp4|ogg)$/.test(p)
+
+async function get(url) {
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`)
+  return res.text()
+}
+
+const client = JSON.parse(await get(`${BINARIES}eveclient_TQ.json`))
+const build = String(client.build)
+console.log(`client build ${build}`)
+
+const fileList = await get(`${BINARIES}eveonline_${build}.txt`)
+const indexLine = fileList.split('\n').find((l) => l.toLowerCase().startsWith('app:/resfileindex.txt,'))
+if (!indexLine) {
+  console.log(fileList.split('\n').slice(0, 15).join('\n'))
+  throw new Error('resfileindex.txt is not named in the build file list')
+}
+const indexText = await get(BINARIES + indexLine.split(',')[1])
+const lines = indexText.split('\n').length
+const { shards, entries } = buildShards(indexText, keep)
+console.log(`index: ${lines} lines, ${entries} kept, ${Object.keys(shards).length} shards`)
+if (entries < 10_000) throw new Error('index looks too small to be real')
+
+// One hull file to prove the whole chain after deploy (see verify-relay.mjs).
+const all = Object.values(shards).flatMap((s) => Object.keys(s))
+const sample = all.filter((p) => p.startsWith('dx9/model/ship/') && p.endsWith('.gr2')).sort()[0] ?? all[0]
+const byFolder = {}
+for (const p of all) byFolder[p.split('/')[0]] = (byFolder[p.split('/')[0]] ?? 0) + 1
+console.log('entries by top folder:', JSON.stringify(byFolder))
+console.log('sample:', sample)
+
+await rm(out, { recursive: true, force: true })
+await mkdir(out, { recursive: true })
+await Promise.all(Object.entries(shards).map(([name, map]) => writeFile(path.join(out, `${name}.json`), JSON.stringify(map))))
+await writeFile(path.join(out, 'meta.json'), JSON.stringify({ build, entries, sample, builtAt: new Date().toISOString() }))

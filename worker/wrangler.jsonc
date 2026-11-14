@@ -11,6 +11,8 @@
   "preview_urls": false,
   "vars": {
     // Sites allowed to load files through this relay, comma separated.
-    "ALLOWED_ORIGINS": "https://orexx1.github.io,http://localhost:5173,http://localhost:4173"
+    "ALLOWED_ORIGINS": "https://orexx1.github.io,http://localhost:5173,http://localhost:4173",
+    // Where the resource index shards are published (built by the site's deploy).
+    "INDEX_URL": "https://orexx1.github.io/EVE-P2P/ri/"
   }
 }
