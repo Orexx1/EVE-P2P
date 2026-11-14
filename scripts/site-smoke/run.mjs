@@ -106,6 +106,19 @@ try {
     await sleep(3000)
     await shoot('zoomed-out')
   }
+  if (state === 'ready') {
+    // A second fight in the same visit reuses the engine and the hulls.
+    await page.click('.arena .hud-top [data-act="leave"]')
+    await page.waitForSelector('.duel:not([hidden]) [data-act="solo"]', { timeout: 20_000 })
+    await page.evaluate(() => (window.__arena.models = 'between fights'))
+    const again = Date.now()
+    await page.click('[data-act="solo"]')
+    await page.waitForFunction(() => window.__arena.models === 'ready' || window.__arena.models === 'failed', { timeout: 120_000 })
+    state = String(await page.evaluate(() => window.__arena.models))
+    note(`second fight: models ${state} after ${((Date.now() - again) / 1000).toFixed(1)} s`)
+    await sleep(4000)
+    await shoot('rematch')
+  }
 } catch (err) {
   note(`FAILED: ${err.stack || err}`)
   await shoot('failure').catch(() => {})
