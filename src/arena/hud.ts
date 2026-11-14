@@ -293,7 +293,7 @@ export class Hud {
         <button type="button" data-act="leave">Leave</button>
         ${document.fullscreenEnabled ? '<button type="button" data-act="fullscreen">Full screen</button>' : ''}
         <button type="button" data-act="graphics" aria-expanded="false" data-el="gfxButton">Graphics</button>
-        <span data-el="room">${session.title ? `${esc(session.title)}, ` : ''}${session.roomCode ? `${session.title ? 'room' : 'Room'} ${esc(session.roomCode)}${session.via === 'relay' ? ', relayed' : ''}` : session.title ? 'solo' : 'Solo flight'}</span>
+        <span data-el="room">${esc(this.roomLabel())}</span>
         <span data-el="clock"></span>
         <span data-el="loading"></span>
       </div>
@@ -704,6 +704,13 @@ export class Hud {
     }
   }
 
+  /** The fight's name and room, and whether it is running through the relay just now. */
+  private roomLabel(): string {
+    const s = this.session
+    const room = s.roomCode ? `${s.title ? 'room' : 'Room'} ${s.roomCode}${s.via === 'relay' ? ', relayed' : ''}` : s.title ? 'solo' : 'Solo flight'
+    return `${s.title ? `${s.title}, ` : ''}${room}`
+  }
+
   private write(el: HTMLElement, html: string) {
     if (this.written.get(el) === html) return
     this.written.set(el, html)
@@ -999,6 +1006,7 @@ export class Hud {
     if (lockedBy) effects.unshift(lockedBy > 1 ? `Targeted by ${lockedBy}` : 'Targeted')
     else if (lockingBy) effects.unshift('Being targeted')
     this.write(this.el.effects, effects.map((e) => `<span>${esc(e)}</span>`).join(''))
+    this.write(this.el.room, esc(this.roomLabel()))
 
     // Modules.
     own.modules.forEach((run, i) => {

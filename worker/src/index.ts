@@ -40,7 +40,7 @@ const HOUR = 3_600
 const DX11_SHADERS = 'graphics/effect.dx11/'
 const DX12_SHADERS = 'graphics/effect.dx12/'
 /** Bumped when behaviour changes, so deploy checks can tell which version is live. */
-const VERSION = 'v3'
+const VERSION = 'v4'
 
 const CONTENT_TYPES: Record<string, string> = {
   png: 'image/png',
@@ -181,9 +181,10 @@ export class Room extends DurableObject<Env> {
   }
 
   async fetch(request: Request): Promise<Response> {
-    const role = new URL(request.url).searchParams.get('role') === 'host' ? 'host' : 'guest'
+    const params = new URL(request.url).searchParams
+    const role = params.get('role') === 'host' ? 'host' : 'guest'
     const pair = new WebSocketPair()
-    this.logic.join(pair[1] as unknown as RoomSocket, role)
+    this.logic.join(pair[1] as unknown as RoomSocket, role, params.get('key') ?? '')
     return new Response(null, { status: 101, webSocket: pair[0] } as ResponseInit)
   }
 

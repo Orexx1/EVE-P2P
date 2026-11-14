@@ -228,6 +228,34 @@ describe('duel rooms', () => {
     expect(logic.join(socket(), 'host')).toBe(0)
   })
 
+  it('lets a player who comes back with the same key take their seat over', () => {
+    const { logic, socket } = fakeRoom()
+    const [asleep, back, stranger, guest, again] = [socket(), socket(), socket(), socket(), socket()]
+    logic.join(asleep, 'host', 'key-1')
+    // Someone else wanting the host seat is still turned away.
+    expect(logic.join(stranger, 'host', 'key-2')).toBe(4409)
+    expect(asleep.closed).toBeNull()
+    // The host's phone went to sleep and woke up: the old connection goes, the room stays.
+    expect(logic.join(back, 'host', 'key-1')).toBe(0)
+    expect(asleep.closed).toBe(4000)
+    logic.closed(asleep)
+    expect(back.closed).toBeNull()
+    expect(back.sent).toEqual(['#seated'])
+
+    logic.join(guest, 'guest', 'key-3')
+    expect(back.sent).toEqual(['#seated', '#joined'])
+    // The host drops and returns mid-fight: the guest is not thrown out, and the host is told the guest is there.
+    expect(logic.join(again, 'host', 'key-1')).toBe(0)
+    logic.closed(back)
+    expect(guest.closed).toBeNull()
+    expect(again.sent).toEqual(['#seated', '#joined'])
+    logic.message(again, '{"t":"snap"}')
+    expect(guest.sent.at(-1)).toBe('{"t":"snap"}')
+    // Leaving for real still empties the room.
+    logic.closed(again)
+    expect(guest.closed).toBe(4001)
+  })
+
   it('only opens rooms for allowed sites, valid codes and WebSocket requests', async () => {
     const fetched: string[] = []
     const rooms = {

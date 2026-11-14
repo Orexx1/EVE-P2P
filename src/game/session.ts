@@ -548,7 +548,13 @@ export abstract class Session {
   /** Which wave of the enemy is on the field, and how many there are in all; [1, 1] when they are all there from the start. */
   wave: [number, number] = [1, 1]
   /** How the two players are connected; null when flying solo. */
-  via: Channel['via'] | null = null
+  /** Reads how the two players are connected right now. */
+  protected route: (() => Channel['via']) | null = null
+
+  /** How the two players are connected at the moment; null when flying alone. A fight can move between the two. */
+  get via(): Channel['via'] | null {
+    return this.route?.() ?? null
+  }
   /** What can be seen happening between ships right now: webs, neutralizers, repairs and the like. */
   links: Link[] = []
   protected over = false
@@ -644,7 +650,7 @@ export class HostSession extends Session {
     this.enlist(this.combat)
     this.syncViews()
     if (channel) {
-      this.via = channel.via
+      this.route = () => channel.via
       channel.onMessage = (raw) => this.receive(raw)
       channel.onClose = () => {
         this.stop()
@@ -874,7 +880,7 @@ export class GuestSession extends Session {
     this.own = ownView(combat, 1)
     this.sights = sights(combat, 1)
     players.forEach((player, index) => applyNav(player.spec, combat.stats[index]))
-    this.via = channel.via
+    this.route = () => channel.via
     channel.onMessage = (raw) => this.receive(raw)
     channel.onClose = () => this.end('The other player disconnected.')
   }

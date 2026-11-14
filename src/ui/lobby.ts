@@ -27,7 +27,21 @@ interface Plan {
   extras: Extra[]
   /** Flown alone: the computer takes the friend's seat. */
   wingman: Extra | null
+  /** The scenario this is, if it is one. */
+  scenario?: string
 }
+
+/** A room this page has open, kept so that the same room can be opened again if the page is reloaded while it waits. */
+interface OpenRoom {
+  code: string
+  key: string
+  scenario: string | null
+  extras: Extra[]
+  at: number
+}
+const ROOM_KEY = 'eve-p2p:room'
+/** A room nobody has joined is not worth bringing back after this long. */
+const ROOM_KEPT_MS = 15 * 60_000
 
 function scenarioCard(scenario: Scenario): string {
   const you = scenario.pilots ? scenario.pilots.map(hullOf).join(', ') : 'Your own fit'
@@ -94,7 +108,8 @@ export function createLobby(host: HTMLElement): Lobby {
       <div class="room" hidden>
         <p data-el="roomFor">Give this code to your opponent:</p>
         <p class="room-code" data-el="roomCode"></p>
-        <p class="hint">Waiting for them to join. Keep this page open.</p>
+        <p><button type="button" data-act="invite">Send an invite link</button></p>
+        <p class="hint">Waiting for them to join. You can switch to another app to send the code: the room stays open under the same code and picks up when you come back to this page.</p>
         <button type="button" class="link" data-act="cancel">Close the room</button>
       </div>
       <p class="duel-status" role="status" aria-live="polite"></p>
@@ -132,10 +147,31 @@ export function createLobby(host: HTMLElement): Lobby {
   }
 
   const setBusy = (busy: boolean) => buttons().forEach((b) => (b.disabled = busy))
+  const remember = (open: OpenRoom | null) => {
+    try {
+      if (open) sessionStorage.setItem(ROOM_KEY, JSON.stringify(open))
+      else sessionStorage.removeItem(ROOM_KEY)
+    } catch {
+      // No storage: a reload just starts over.
+    }
+  }
+  const remembered = (): OpenRoom | null => {
+    try {
+      const open = JSON.parse(sessionStorage.getItem(ROOM_KEY) ?? 'null') as OpenRoom | null
+      const good = open && normaliseCode(String(open.code)) === open.code && typeof open.key === 'string' && Array.isArray(open.extras) && Date.now() - open.at < ROOM_KEPT_MS
+      return good ? open : null
+    } catch {
+      return null
+    }
+  }
+  /** Set once anything has been started, so a remembered room is only ever brought back on a fresh page. */
+  let busyOnce = false
+
   const reset = (message = '') => {
     attempt++
     hosted?.close()
     hosted = null
+    remember(null)
     room.hidden = true
     choices.hidden = false
     setBusy(false)
@@ -161,7 +197,11 @@ export function createLobby(host: HTMLElement): Lobby {
     launchArena(session, (reason) => reset(reason ?? ''))
   }
 
-  const fail = (err: unknown) => reset(err instanceof Error ? err.message : String(err))
+  const fail = (err: unknown) => {
+    reset(err instanceof Error ? err.message : String(err))
+    // The reason is the thing to read; it must not be left off the bottom of a phone screen.
+    status.scrollIntoView({ block: 'nearest' })
+  }
 
   /** A duel in the loaded fit, with whatever extra ships the host added. */
   const duelPlan = (): Plan => ({
@@ -180,6 +220,7 @@ export function createLobby(host: HTMLElement): Lobby {
     }
     const friend = pilotFit(scenario, 1)
     return {
+      scenario: scenario.id,
       setup: { coop: true, title: scenario.title, brief: scenario.brief, guestEft: friend ?? undefined },
       mine: given ? { eft: given, fit: loadFit(given, dataset!) } : { eft: current!.eft, fit: current!.fit },
       extras: scenarioEnemies(scenario),
@@ -187,32 +228,50 @@ export function createLobby(host: HTMLElement): Lobby {
     }
   }
 
-  async function create(plan: Plan) {
+  async function create(plan: Plan, reopen?: { code: string; key: string }) {
     const pilot = pilotName()
     const id = ++attempt
+    busyOnce = true
     setBusy(true)
-    status.textContent = 'Opening a room…'
+    status.textContent = reopen ? `Opening room ${reopen.code} again…` : 'Opening a room…'
     try {
-      const opened = await hostRoom()
-      if (id !== attempt) return opened.close()
-      hosted = opened
-      roomCode.textContent = opened.code
-      roomFor.textContent = plan.setup.coop ? `${plan.setup.title}: give this code to your friend. You fly on the same side.` : 'Give this code to your opponent:'
-      choices.hidden = true
-      room.hidden = false
-      status.textContent = ''
-      const channel = await opened.guest
-      if (id !== attempt) return channel.close()
-      hosted = null
-      status.textContent = `${plan.setup.coop ? 'Friend' : 'Opponent'} connected${channel.via === 'relay' ? ' through the relay' : ''}. Exchanging fits…`
-      const theirs = await handshake(channel, { pilot, eft: plan.mine.eft, extras: plan.extras, setup: plan.setup }, dataset!)
-      const players = [
-        playerFor(pilot, plan.mine.fit, 0, false),
-        playerFor(theirs.pilot, theirs.fit, plan.setup.coop ? 0 : 1, false),
-        ...loadExtras(plan.extras, dataset!),
-      ]
-      warm(...players.map((p) => p.fit))
-      await launch(new HostSession(players, channel, opened.code, dataset!), plan.setup)
+      // What to say beside the room code: why the last player to try could not start, if one did.
+      let note = ''
+      for (;;) {
+        const opened = await hostRoom(reopen)
+        if (id !== attempt) return opened.close()
+        hosted = opened
+        remember({ code: opened.code, key: opened.key, scenario: plan.scenario ?? null, extras: plan.scenario ? [] : plan.extras, at: Date.now() })
+        roomCode.textContent = opened.code
+        roomFor.textContent = plan.setup.coop ? `${plan.setup.title}: give this code to your friend. You fly on the same side.` : 'Give this code to your opponent:'
+        choices.hidden = true
+        room.hidden = false
+        status.textContent = note
+        const channel = await opened.guest
+        if (id !== attempt) return channel.close()
+        hosted = null
+        status.textContent = `${plan.setup.coop ? 'Friend' : 'Opponent'} connected${channel.via === 'relay' ? ' through the relay' : ''}. Exchanging fits…`
+        let theirs: Awaited<ReturnType<typeof handshake>>
+        try {
+          theirs = await handshake(channel, { pilot, eft: plan.mine.eft, extras: plan.extras, setup: plan.setup }, dataset!)
+        } catch (err) {
+          if (id !== attempt) return
+          // Someone who could not start (no fit loaded yet, an old copy of the page, a dropped
+          // connection) must be able to put that right and join again under the same code.
+          note = `${err instanceof Error ? err.message : String(err)} The room is still open under the same code.`
+          reopen = { code: opened.code, key: opened.key }
+          continue
+        }
+        if (id !== attempt) return channel.close()
+        remember(null)
+        const players = [
+          playerFor(pilot, plan.mine.fit, 0, false),
+          playerFor(theirs.pilot, theirs.fit, plan.setup.coop ? 0 : 1, false),
+          ...loadExtras(plan.extras, dataset!),
+        ]
+        warm(...players.map((p) => p.fit))
+        return await launch(new HostSession(players, channel, opened.code, dataset!), plan.setup)
+      }
     } catch (err) {
       if (id === attempt) fail(err)
     }
@@ -227,6 +286,7 @@ export function createLobby(host: HTMLElement): Lobby {
     }
     const pilot = pilotName()
     const id = ++attempt
+    busyOnce = true
     setBusy(true)
     status.textContent = `Joining room ${code}…`
     try {
@@ -248,8 +308,47 @@ export function createLobby(host: HTMLElement): Lobby {
     }
   }
 
+  /** Hands the room to the other player as a link that fills the code in for them. */
+  async function invite() {
+    const code = hosted?.code
+    if (!code) return
+    const url = `${location.origin}${location.pathname}?room=${code}`
+    const text = `Join my EVE duel sandbox room ${code}`
+    try {
+      // The share sheet opens over this page, so the room is not put to sleep by sending it.
+      if (navigator.share) return await navigator.share({ title: 'EVE duel sandbox', text, url })
+      await navigator.clipboard.writeText(url)
+      status.textContent = 'Invite link copied. Paste it into a message to the other player.'
+    } catch (err) {
+      // Closing the share sheet without sending is not a failure.
+      if ((err as { name?: string })?.name !== 'AbortError') status.textContent = `Send them this link: ${url}`
+    }
+  }
+
+  /** A room that was waiting when the page was reloaded is opened again under the same code. */
+  function restore() {
+    if (busyOnce || !dataset) return
+    const open = remembered()
+    if (!open) return
+    const scenario = open.scenario ? SCENARIOS.find((s) => s.id === open.scenario) : null
+    if (open.scenario && !scenario) return remember(null)
+    // A fight flown in the player's own ship has to wait for that ship to load.
+    if (!(scenario && pilotFit(scenario, 0)) && !current) return
+    try {
+      const plan = scenario ? scenarioPlan(scenario) : { ...duelPlan(), extras: open.extras }
+      if (plan) void create(plan, { code: open.code, key: open.key })
+    } catch {
+      remember(null)
+    }
+  }
+
+  // An invite link carries the room code.
+  const invited = normaliseCode(new URLSearchParams(location.search).get('room') ?? '')
+  if (invited) codeInput.value = invited
+
   /** A duel flown alone: against the extra ships if any enemies were added, otherwise against a copy of the loaded fit. */
   function solo() {
+    busyOnce = true
     const pilot = pilotName()
     const plan = duelPlan()
     const sparring = host.querySelector<HTMLInputElement>('#spar')!.checked
@@ -264,6 +363,7 @@ export function createLobby(host: HTMLElement): Lobby {
 
   /** A scenario flown alone: in a challenge the computer flies the friend's ship as a wingman. */
   function soloScenario(plan: Plan) {
+    busyOnce = true
     try {
       const others = loadExtras([...(plan.wingman ? [plan.wingman] : []), ...plan.extras], dataset!)
       void launch(new HostSession([playerFor(pilotName(), plan.mine.fit, 0, false), ...others], null, null, dataset!), plan.setup)
@@ -276,6 +376,7 @@ export function createLobby(host: HTMLElement): Lobby {
     const target = event.target as HTMLElement
     const act = target.closest<HTMLElement>('[data-act]')?.dataset.act
     if (act === 'cancel') return reset()
+    if (act === 'invite') return void invite()
     if (!dataset || !act) return
     if (act === 'join') return void join()
     const scenario = SCENARIOS.find((s) => s.id === target.closest<HTMLElement>('[data-scenario]')?.dataset.scenario)
@@ -305,6 +406,11 @@ export function createLobby(host: HTMLElement): Lobby {
     setData(data) {
       dataset = data
       section.hidden = false
+      if (invited && !busyOnce && !remembered()) {
+        status.textContent = `You were invited to room ${invited}. The code is filled in: tap Join. If the fight is flown in your own ship, load a fit first.`
+        codeInput.scrollIntoView({ block: 'center' })
+      }
+      restore()
     },
     setFit(next) {
       current = next
@@ -312,6 +418,7 @@ export function createLobby(host: HTMLElement): Lobby {
       if (next) warm(next.fit)
       own.hidden = !next
       noFit.hidden = !!next
+      restore()
     },
   }
 }

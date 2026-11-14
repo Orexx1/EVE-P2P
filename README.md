@@ -284,14 +284,29 @@ to GitHub Pages (`.github/workflows/deploy.yml`): https://orexx1.github.io/EVE-P
   exponentially, with a time constant of mass x inertia modifier / 1e6 seconds,
   which reproduces in-game align times. `combat.ts` is locking, module cycles,
   capacitor, damage and destruction.
-- `src/net/` opens a room. The direct route is WebRTC through
+- `src/net/` opens a room. There are two routes between the players and a room
+  uses both. The relay (a WebSocket room on the Cloudflare Worker,
+  `worker/src/room.ts`) works from any network and connects in well under a
+  second, so the fight starts on it. The direct route is WebRTC through
   [PeerJS](https://peerjs.com/): its free public broker introduces the two
-  browsers and game traffic then flows straight between them. Many home and
-  mobile networks do not allow that, so the host also opens the room on the relay
-  (a WebSocket room on the Cloudflare Worker, `worker/src/room.ts`) and a guest
-  who cannot get through directly joins there after eight seconds. The fight
-  view shows "relayed" beside the room code when that happened. Either way the
-  game runs in the host's browser.
+  browsers and traffic then flows straight between them. Many home and mobile
+  networks do not allow that, or allow it badly, so it is only used once each
+  side has heard the other on it, and the fight drops back to the relay if it
+  goes quiet. The fight view shows "relayed" beside the room code while the
+  relay is carrying it. Either way the game runs in the host's browser.
+  - A room that is waiting repairs itself. A phone that is put to sleep, or
+    switched to another app to send the code, loses its connections; when the
+    page comes back the host takes the same seat again under the same code, and
+    a page that was reloaded reopens the room it had. A guest who tries a code
+    nobody is hosting keeps trying for twenty seconds in case the host is on
+    their way back.
+  - A joiner who cannot start (no fit loaded for a fight that needs one, an old
+    copy of the page) is told why, and the room stays open under the same code
+    for them to try again.
+  - "Send an invite link" hands over a link that fills the code in.
+  - `scripts/room-smoke/` hosts and joins a room on the published site with two
+    browsers after every change to the connection code: with nothing in the
+    way, kept to the relay, and with direct connections blocked.
 - `src/game/` is the session. The host's browser runs the simulation ten times a
   second and sends snapshots (rows of rounded numbers, about 1.6 kB for eleven
   capital ships); the guest sends orders and commands, which the host

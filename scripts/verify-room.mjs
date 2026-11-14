@@ -3,7 +3,7 @@
 // told when the guest leaves. Runs after deploy (the development sandbox
 // cannot reach Cloudflare). Waits first for the Worker version that has rooms.
 const RELAY = 'https://eve-p2p-res.dustin-m117.workers.dev'
-const WANTED = / v([3-9]|\d\d)/
+const WANTED = / v([4-9]|\d\d)/
 
 for (let i = 0; ; i++) {
   const body = await fetch(`${RELAY}/?t=${Date.now()}`).then((r) => r.text()).catch((e) => `unreachable: ${e.message}`)
@@ -17,8 +17,8 @@ const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
 const code = Array.from({ length: 6 }, () => ALPHABET[Math.floor(Math.random() * ALPHABET.length)]).join('')
 
 /** A seat in a room that records everything it is sent. */
-function seat(room, role) {
-  const socket = new WebSocket(`${RELAY.replace(/^http/, 'ws')}/room/${room}?role=${role}`)
+function seat(room, role, key = '') {
+  const socket = new WebSocket(`${RELAY.replace(/^http/, 'ws')}/room/${room}?role=${role}${key ? `&key=${key}` : ''}`)
   const got = []
   const waiters = []
   const settle = () => {
@@ -46,8 +46,12 @@ const early = seat(code, 'guest')
 await early.expect('closed:4404')
 console.log('a guest with no host is turned away (4404)')
 
-const host = seat(code, 'host')
+const asleep = seat(code, 'host', 'verify-key')
+await asleep.expect('#seated')
+const host = seat(code, 'host', 'verify-key')
 await host.expect('#seated')
+await asleep.expect('closed:4000')
+console.log('a host coming back with the same key takes the seat over (4000 for the old connection)')
 const second = seat(code, 'host')
 await second.expect('closed:4409')
 console.log('the host is seated; a second host is turned away (4409)')

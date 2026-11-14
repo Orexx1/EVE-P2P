@@ -2,11 +2,12 @@
 // it by its code, and both have to end up in the same running fight.
 //
 // MODE says what the network between them is like:
-//   open     nothing in the way: the two connect directly
-//   relay    the guest skips the direct attempt (?relay) and joins on the relay
+//   open     nothing in the way: the fight starts on the relay and moves to
+//            a direct connection
+//   relay    the guest never tries the direct route (?relay)
 //   blocked  neither browser may use UDP, as on networks that will not let
 //            two browsers reach each other: the direct attempt cannot work
-//            and the room has to carry on through the relay
+//            and the fight has to run through the relay
 import puppeteer from 'puppeteer'
 
 const SITE = process.env.SITE || 'https://orexx1.github.io/EVE-P2P/'
@@ -83,6 +84,7 @@ if (together) {
   note(`20 s on: host ${h.arena ? `clock ${h.clock}` : `back in the lobby: ${h.status}`}; guest ${g.arena ? `clock ${g.clock}` : `back in the lobby: ${g.status}`}`)
   if (!h.arena || !g.arena) failure = 'one side dropped back to the lobby'
   else if (after - before < 15) failure = `the guest's clock only moved ${after - before} s in 20 s`
+  else if (/relayed/.test(g.room) !== (MODE !== 'open')) failure = `expected the fight to be ${MODE === 'open' ? 'direct' : 'relayed'} by now, but its label is "${g.room}"`
   else note(`both in the same fight: ${g.room}`)
 }
 for (const side of [host, guest]) await side.page.screenshot({ path: `${process.env.OUT || '.'}/room-${MODE}-${side.name.toLowerCase()}.png` }).catch(() => {})
