@@ -125,6 +125,15 @@ describe('resource index', () => {
     expect(poisoned).toHaveBeenCalledOnce()
   })
 
+  it('falls back to the dx12 shader folder when the dx11 one is asked for', async () => {
+    const line = 'res:/graphics/effect.dx12/managed/space/system/blit.sm_hi,af/af01a01a79a60851_ef9a766cab29d255e16678bbda414e64,x,1,1'
+    const fetcher = fetcherFor(line)
+    const res = await handle(req('/res/graphics/effect.dx11/managed/space/system/blit.sm_hi'), env, fetcher as unknown as typeof fetch)
+    expect(res.status).toBe(200)
+    expect(await res.text()).toContain('af/af01a01a79a60851_ef9a766cab29d255e16678bbda414e64')
+    expect((await handle(req('/res/graphics/effect.dx11/nope.sm_hi'), env, fetcher as unknown as typeof fetch)).status).toBe(404)
+  })
+
   it('reports an unavailable index as 503', async () => {
     const down = vi.fn(async () => new Response('', { status: 500 }))
     expect((await handle(req(`/res/${GR2}`), env, down as unknown as typeof fetch)).status).toBe(503)

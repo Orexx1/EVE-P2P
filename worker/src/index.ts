@@ -25,6 +25,10 @@ const RESOURCE_PATH = /^\/r\/([0-9a-f]{2}\/[0-9a-f]{16}_[0-9a-f]{32})$/
 const YEAR = 31_536_000
 const DAY = 86_400
 const HOUR = 3_600
+const DX11_SHADERS = 'graphics/effect.dx11/'
+const DX12_SHADERS = 'graphics/effect.dx12/'
+/** Bumped when behaviour changes, so deploy checks can tell which version is live. */
+const VERSION = 'v2'
 
 const CONTENT_TYPES: Record<string, string> = {
   png: 'image/png',
@@ -82,7 +86,7 @@ export async function handle(request: Request, env: Env, fetcher: typeof fetch =
     cors.set('Allow', 'GET, HEAD, OPTIONS')
     return text(405, 'Read-only.', cors)
   }
-  if (url.pathname === '/') return text(200, 'EVE duel sandbox resource relay.', cors)
+  if (url.pathname === '/') return text(200, `EVE duel sandbox resource relay. ${VERSION}`, cors)
 
   let address: string
   let maxAge = YEAR
@@ -100,7 +104,12 @@ export async function handle(request: Request, env: Env, fetcher: typeof fetch =
     if (!logical || logical.length > 300 || logical.split('/').some((part) => part === '..' || part === '.' || part === '')) {
       return text(404, 'Not a resource path.', cors)
     }
-    const found = await lookup(logical, env, fetcher)
+    let found = await lookup(logical, env, fetcher)
+    // The live client ships its compiled shaders under effect.dx12 only; the
+    // model loader still asks for the older effect.dx11 folder.
+    if (found === null && logical.startsWith(DX11_SHADERS)) {
+      found = await lookup(DX12_SHADERS + logical.slice(DX11_SHADERS.length), env, fetcher)
+    }
     if (found === 'unavailable') return text(503, 'The resource index is not available.', cors)
     if (!found) return text(404, 'No such resource.', cors)
     address = found
