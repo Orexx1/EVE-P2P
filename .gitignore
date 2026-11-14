@@ -5,3 +5,5 @@ public/sde
 .DS_Store
 .wrangler
 public/ri
+scripts/model-smoke/node_modules
+scripts/model-smoke/package*.json

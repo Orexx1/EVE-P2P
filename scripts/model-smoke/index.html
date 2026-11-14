@@ -1,0 +1,50 @@
+<!doctype html>
+<!-- Smoke test page: loads one real hull through the relay with ccpwgl2.
+     Served by run.mjs in CI next to the library's dist files. -->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>model smoke test</title>
+    <style>
+      html, body { margin: 0; background: #000; }
+      canvas { display: block; width: 640px; height: 400px; }
+    </style>
+  </head>
+  <body>
+    <canvas id="canvas3d" width="640" height="400"></canvas>
+    <script src="ccpwgl2_int.min.js"></script>
+    <script>
+      const RELAY = 'https://eve-p2p-res.dustin-m117.workers.dev'
+      const DNA = new URLSearchParams(location.search).get('dna') || 'ab1_t1:amarrbase:amarr'
+      const log = (...args) => console.log('[smoke]', ...args)
+      window.__state = 'starting'
+      ;(async () => {
+        try {
+          tw2.Register({ paths: { res: `${RELAY}/res/`, r: `${RELAY}/res/` } })
+          await tny.Initialize({
+            canvas: 'canvas3d',
+            camera: {},
+            device: {
+              effectProfile: tw2.const.DeviceEffectProfile.DX11,
+              shaderQuality: tw2.const.DeviceShaderQuality.MEDIUM,
+            },
+          })
+          log('initialized')
+          const scene = await tny.FetchScene('res:/dx9/scene/universe/a01_cube.black')
+          log('scene fetched')
+          let last = -1
+          const ship = await scene.Fetch(DNA, ({ percent, pending, total }) => {
+            const step = Math.floor(percent / 10)
+            if (step !== last) log(`progress ${percent}% (${pending} of ${total} outstanding)`)
+            last = step
+          })
+          log('ship fetched:', ship && ship.constructor && ship.constructor.name)
+          window.__state = 'loaded'
+        } catch (err) {
+          log('FAILED', (err && (err.stack || err.message || err.name)) || String(err))
+          window.__state = 'error'
+        }
+      })()
+    </script>
+  </body>
+</html>
