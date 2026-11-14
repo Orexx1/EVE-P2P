@@ -220,6 +220,22 @@ button.link {
   letter-spacing: 0;
 }
 
+.duel label.check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.875rem;
+  cursor: pointer;
+}
+
+.duel label.check input {
+  width: 1.125rem;
+  height: 1.125rem;
+  min-width: 1.125rem;
+  padding: 0;
+  accent-color: var(--text);
+}
+
 .duel-row {
   display: flex;
   gap: 0.5rem;

@@ -26,6 +26,10 @@ html.in-arena {
   height: 100%;
 }
 
+.arena canvas.fx {
+  pointer-events: none;
+}
+
 /* Takes every drag, pinch and tap meant for space, whichever canvas is drawing. */
 .arena .surface {
   touch-action: none;
@@ -146,6 +150,22 @@ html.in-arena {
   transform: rotate(45deg);
 }
 
+.bracket.locking .bracket-mark {
+  border-color: var(--warn);
+  animation: pulse 0.6s steps(2) infinite;
+}
+
+.bracket.locked .bracket-mark {
+  border-color: #ff5a4d;
+  box-shadow: 0 0 0 3px rgb(255 90 77 / 0.25);
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
 .bracket-label {
   position: absolute;
   top: 34px;
@@ -160,9 +180,14 @@ html.in-arena {
   position: absolute;
   top: max(0.5rem, env(safe-area-inset-top));
   right: max(0.5rem, env(safe-area-inset-right));
-  width: 14rem;
+  width: 13rem;
   display: grid;
   gap: 0.375rem;
+}
+
+.arena button.primary {
+  border-color: var(--muted);
+  font-weight: 600;
 }
 
 .panel {
@@ -182,6 +207,18 @@ html.in-arena {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 0.3125rem;
+}
+
+.pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.3125rem;
+}
+
+.pair button {
+  padding-left: 0.25rem;
+  padding-right: 0.25rem;
+  white-space: nowrap;
 }
 
 .overview table {
@@ -212,19 +249,60 @@ html.in-arena {
   max-width: none;
 }
 
-.ship-hud {
+/* Bottom centre: hostile effects, then the ship's status beside its modules. */
+.hud-bottom {
   position: absolute;
-  bottom: max(0.5rem, env(safe-area-inset-bottom));
-  left: 50%;
+  bottom: max(0.375rem, env(safe-area-inset-bottom));
+  /* Centred in the space left of the side panels, so a long module rack does not run under them. */
+  left: calc((100% - 13.5rem) / 2);
   transform: translateX(-50%);
+  display: grid;
+  justify-items: center;
+  gap: 0.25rem;
+  max-width: calc(100% - 1rem);
+  pointer-events: none;
+}
+
+.hud-bottom > * {
+  pointer-events: auto;
+}
+
+.hud-bottom-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.375rem;
+}
+
+.effects {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.25rem;
+  min-height: 1.25rem;
+  pointer-events: none;
+}
+
+.effects span {
+  padding: 0 0.4375rem;
+  background: rgb(60 22 20 / 0.9);
+  border: 1px solid #ff5a4d;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.ship-hud {
   display: grid;
   grid-template-columns: 7.5rem auto auto;
   align-items: end;
-  column-gap: 0.75rem;
+  column-gap: 0.625rem;
   padding: 0.375rem 0.625rem 0.4375rem;
   background: rgb(20 29 39 / 0.82);
   border: 1px solid var(--line);
   border-radius: 4px;
+}
+
+.ship-hud button {
+  white-space: nowrap;
 }
 
 .ship-hud svg {
@@ -241,9 +319,10 @@ html.in-arena {
   stroke: var(--line);
 }
 
-/* Layers are full until combat arrives; the dash array is what will drain them. */
+/* Each arc is drawn as a dash whose length is the layer's percentage. */
 .ship-hud .fill {
   stroke-dasharray: 100 100;
+  transition: stroke-dasharray 0.2s linear;
 }
 
 .ship-hud .shield {
@@ -287,13 +366,245 @@ html.in-arena {
   background: var(--text);
 }
 
+.layers {
+  grid-column: 2 / 4;
+  display: flex;
+  gap: 0.5rem;
+  white-space: nowrap;
+}
+
+.layers .shield {
+  color: var(--shield);
+}
+
+.layers .armor {
+  color: var(--armor);
+}
+
+.layers .hull {
+  color: var(--hull);
+}
+
+.layers .cap {
+  color: #e8d27a;
+}
+
 .ship-name {
+  display: none;
   grid-column: 2 / 4;
   color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 16rem;
+}
+
+/* The module rack: one row per slot type, high slots on top, as in game. */
+.rack {
+  display: grid;
+  gap: 0.1875rem;
+  justify-items: start;
+}
+
+.rack-row {
+  display: flex;
+  gap: 0.1875rem;
+}
+
+/* A module is a round button. Its rim fills clockwise as the cycle runs. */
+.arena .mod {
+  --p: 0;
+  position: relative;
+  width: 2.375rem;
+  height: 2.375rem;
+  min-height: 0;
+  padding: 3px;
+  border: 0;
+  border-radius: 50%;
+  background: conic-gradient(#7fe08a calc(var(--p) * 1%), var(--line) 0);
+}
+
+.mod-face {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  overflow: hidden;
+  background: #101820;
+  font-size: 0.5625rem;
+  line-height: 1;
+}
+
+.mod-face img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.arena .mod.on {
+  box-shadow: 0 0 0 1px #7fe08a, 0 0 8px rgb(127 224 138 / 0.5);
+}
+
+/* Switched off, finishing its cycle. */
+.arena .mod.stopping {
+  background: conic-gradient(#ff5a4d calc(var(--p) * 1%), var(--line) 0);
+  box-shadow: 0 0 0 1px #ff5a4d;
+}
+
+.arena .mod.reloading .mod-face {
+  opacity: 0.45;
+}
+
+.arena .mod:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.mod-count {
+  position: absolute;
+  right: -2px;
+  bottom: -3px;
+  padding: 0 2px;
+  border-radius: 2px;
+  background: rgb(10 15 20 / 0.9);
+  font-size: 0.625rem;
+  line-height: 1.2;
+  pointer-events: none;
+}
+
+.mod-count:empty {
+  display: none;
+}
+
+.arena .drones {
+  min-height: 1.75rem;
+  padding: 0.125rem 0.5rem;
+}
+
+.arena .drones.on {
+  border-color: #7fe08a;
+}
+
+/* The locked target, top centre: shield, armor and hull, as on a target in game. */
+.target {
+  position: absolute;
+  top: max(0.5rem, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  width: 11rem;
+  padding: 0.3125rem 0.5rem 0.375rem;
+  background: rgb(20 29 39 / 0.82);
+  border: 1px solid #ff5a4d;
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+.target h2 {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bars {
+  display: grid;
+  gap: 2px;
+  margin-top: 0.25rem;
+}
+
+.bar {
+  height: 5px;
+  background: var(--line);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.bar span {
+  display: block;
+  height: 100%;
+  width: 100%;
+  transition: width 0.2s linear;
+}
+
+.bar.shield span {
+  background: var(--shield);
+}
+
+.bar.armor span {
+  background: var(--armor);
+}
+
+.bar.hull span {
+  background: var(--hull);
+}
+
+.combat-log {
+  position: absolute;
+  left: max(0.5rem, env(safe-area-inset-left));
+  /* Clear of the ship status panel, which can reach this far left on a phone. */
+  bottom: calc(max(0.5rem, env(safe-area-inset-bottom)) + 6.5rem);
+  width: min(17rem, 34vw);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.75rem;
+  line-height: 1.3;
+  text-shadow: 0 0 3px #000, 0 0 3px #000;
+  pointer-events: none;
+}
+
+.combat-log li {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.combat-log .dealt {
+  color: #9fe0ff;
+}
+
+.combat-log .taken {
+  color: #ffb070;
+}
+
+.combat-log .miss {
+  color: var(--muted);
+}
+
+.combat-log .note {
+  color: var(--warn);
+}
+
+.result {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+  display: grid;
+  justify-items: center;
+  gap: 0.5rem;
+  width: min(22rem, 80%);
+  padding: 1rem 1.25rem;
+  text-align: center;
+  background: rgb(20 29 39 / 0.94);
+  border: 1px solid var(--muted);
+  border-radius: 6px;
+}
+
+.hud .result h2 {
+  font-size: 1.75rem;
+}
+
+.result.won {
+  border-color: #7fe08a;
+}
+
+.result.lost {
+  border-color: #ff5a4d;
 }
 
 /* Rotate notice: shown instead of the fight on a phone held upright. */

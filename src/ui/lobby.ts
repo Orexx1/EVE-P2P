@@ -4,6 +4,8 @@ import type { LoadedFit } from '../fit/loadFit'
 import { cleanPilot, GuestSession, handshake, HostSession, specFor, type Player, type Session } from '../game/session'
 import { hostRoom, joinRoom, normaliseCode, type HostedRoom } from '../net/room'
 
+const MODELS_KEY = 'eve-p2p:real-models'
+
 const PILOT_KEY = 'eve-p2p:pilot'
 
 export interface Lobby {
@@ -28,6 +30,10 @@ export function createLobby(host: HTMLElement): Lobby {
             maxlength="8" placeholder="Room code" />
           <button type="button" data-act="join">Join room</button>
         </div>
+        <label class="check">
+          <input type="checkbox" id="models" />
+          Real ship models (heavier to load; turn off if the fight stutters)
+        </label>
       </div>
       <div class="room" hidden>
         <p>Give this code to your opponent:</p>
@@ -51,11 +57,28 @@ export function createLobby(host: HTMLElement): Lobby {
   let hosted: HostedRoom | null = null
   let attempt = 0
 
+  const modelsInput = host.querySelector<HTMLInputElement>('#models')!
+  const readModels = () => {
+    try {
+      modelsInput.checked = localStorage.getItem(MODELS_KEY) !== 'off'
+    } catch {
+      modelsInput.checked = true
+    }
+  }
   try {
     pilotInput.value = localStorage.getItem(PILOT_KEY) ?? ''
   } catch {
     // No storage: the name just is not remembered.
   }
+  readModels()
+  modelsInput.addEventListener('change', () => {
+    try {
+      if (modelsInput.checked) localStorage.removeItem(MODELS_KEY)
+      else localStorage.setItem(MODELS_KEY, 'off')
+    } catch {
+      // No storage: models stay on.
+    }
+  })
 
   const setBusy = (busy: boolean) => buttons().forEach((b) => (b.disabled = busy))
   const reset = (message = '') => {
@@ -82,7 +105,11 @@ export function createLobby(host: HTMLElement): Lobby {
     status.textContent = 'Opening the fight…'
     const { launchArena } = await import('../arena/arena')
     reset()
-    launchArena(session, (reason) => reset(reason ?? ''))
+    launchArena(session, (reason) => {
+      // The fight turns models off by itself on a device that cannot keep up.
+      readModels()
+      reset(reason ?? '')
+    })
   }
 
   const fail = (err: unknown) => reset(err instanceof Error ? err.message : String(err))
@@ -106,7 +133,7 @@ export function createLobby(host: HTMLElement): Lobby {
       hosted = null
       status.textContent = 'Opponent connected. Exchanging fits…'
       const theirs = await handshake(channel, mine, dataset)
-      await launch(new HostSession([mine, { ...theirs, spec: specFor(theirs.fit) }], channel, opened.code))
+      await launch(new HostSession([mine, { ...theirs, spec: specFor(theirs.fit) }], channel, opened.code, dataset))
     } catch (err) {
       if (id === attempt) fail(err)
     }
@@ -129,7 +156,7 @@ export function createLobby(host: HTMLElement): Lobby {
       if (id !== attempt) return channel.close()
       status.textContent = 'Connected. Exchanging fits…'
       const theirs = await handshake(channel, mine, dataset)
-      await launch(new GuestSession([{ ...theirs, spec: specFor(theirs.fit) }, mine], channel, code))
+      await launch(new GuestSession([{ ...theirs, spec: specFor(theirs.fit) }, mine], channel, code, dataset))
     } catch (err) {
       if (id === attempt) fail(err)
     }
@@ -137,7 +164,7 @@ export function createLobby(host: HTMLElement): Lobby {
 
   function solo() {
     const mine = me()
-    void launch(new HostSession([mine, { pilot: 'Practice target', fit: mine.fit, spec: mine.spec }], null, null))
+    void launch(new HostSession([mine, { pilot: 'Practice target', fit: mine.fit, spec: { ...mine.spec } }], null, null, current!.dataset))
   }
 
   host.addEventListener('click', (event) => {

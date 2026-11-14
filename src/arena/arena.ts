@@ -4,6 +4,7 @@ import type { Session } from '../game/session'
 import { add, scale } from '../sim/vec'
 import { timeConstant, wantedVelocity, type ShipState } from '../sim/world'
 import shipModels from '../data/shipModels.json'
+import { FireEffects } from './fx'
 import { Hud } from './hud'
 import { CameraRig, type FightView, type ShipView } from './rig'
 import { SpaceView } from './scene'
@@ -42,6 +43,7 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
   root.className = 'arena'
   root.innerHTML = `
     <canvas class="standin"></canvas>
+    <canvas class="fx"></canvas>
     <div class="surface"></div>
     <div class="rotate" role="alert" hidden>
       <svg viewBox="0 0 64 64" aria-hidden="true">
@@ -81,7 +83,12 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
     onExit(reason)
   }
 
-  const hud = new Hud(session, { order: (order) => session.order(order), leave: () => exit(null) })
+  const fx = new FireEffects(root.querySelector<HTMLCanvasElement>('canvas.fx')!, session.me)
+  const hud = new Hud(session, {
+    order: (order) => session.order(order),
+    command: (command) => session.command(command),
+    leave: () => exit(null),
+  })
   root.append(hud.root)
   rotate.querySelector('button')!.addEventListener('click', () => exit(null))
   session.onEnded = (reason) => exit(reason)
@@ -94,6 +101,7 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
     session.setReady(!blocked)
     rig.resize(root.clientWidth, root.clientHeight)
     view.resize(root.clientWidth, root.clientHeight)
+    fx.resize(root.clientWidth, root.clientHeight)
   }
   window.addEventListener('resize', layout)
   portrait.addEventListener('change', layout)
@@ -132,17 +140,28 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
   }
 
   let frame = 0
+  let lastFrame = performance.now()
+  /** When each ship blew up, so the hull can vanish inside the fireball. */
+  const diedAt: [number, number] = [0, 0]
   const draw = (now: number) => {
     frame = requestAnimationFrame(draw)
+    const dt = Math.min((now - lastFrame) / 1000, 0.1)
+    lastFrame = now
     if (!rotate.hidden) return
     const ahead = Math.min((now - session.worldAt) / 1000, 0.5)
     const ships: [ShipState, ShipState] = [predicted(0, ahead), predicted(1, ahead)]
+    const events = session.events.splice(0)
+    for (const event of events) if (event.t === 'dead') diedAt[event.who] = now
+    const alive = (index: 0 | 1) => !diedAt[index] || now - diedAt[index] < 250
     const views: [ShipView, ShipView] = [
-      { ...ships[0], thrust: thrust(ships[0], session.players[0].spec.maxVelocity), alive: true },
-      { ...ships[1], thrust: thrust(ships[1], session.players[1].spec.maxVelocity), alive: true },
+      { ...ships[0], thrust: alive(0) ? thrust(ships[0], session.players[0].spec.maxVelocity) : 0, alive: alive(0) },
+      { ...ships[1], thrust: alive(1) ? thrust(ships[1], session.players[1].spec.maxVelocity) : 0, alive: alive(1) },
     ]
     rig.update(views)
     view.render(views)
+    fx.add(events)
+    fx.draw([rig.project(0), rig.project(1)], dt)
+    hud.report(events)
     hud.update(ships, rig.project(session.them), now)
   }
   frame = requestAnimationFrame(draw)

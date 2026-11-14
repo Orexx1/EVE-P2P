@@ -65,7 +65,10 @@ try {
   await page.click('[data-act="solo"]')
   await page.waitForSelector('.arena .hud', { timeout: 30_000 })
   await sleep(1500)
-  await page.click('.arena [data-act="orbit"]').catch(() => note('no orbit button'))
+  // Close in and start shooting, so the pictures show a fight and not just a ship.
+  await page.select('.arena [data-el="orbitRange"]', '500')
+  await page.click('.arena [data-act="orbit"]')
+  await page.click('.arena [data-el="lock"]')
   await shoot('standin')
 
   const deadline = Date.now() + 240_000
@@ -82,9 +85,13 @@ try {
     await sleep(2000)
   }
   note(`models: ${state}`)
-  // Let textures still streaming in land, and the ship get moving.
-  await sleep(state === 'ready' ? 15_000 : 2000)
+  for (const mod of await page.$$eval('.arena .mod:not(:disabled)', (els) => els.map((e) => e.dataset.mod))) {
+    await page.click(`.arena [data-mod="${mod}"]`)
+  }
+  // Let textures still streaming in land, and the fight develop.
+  await sleep(state === 'ready' ? 12_000 : 2000)
   await shoot('fight')
+  note(`hud: ${await page.evaluate(() => [document.querySelector('[data-el="layers"]')?.textContent, document.querySelector('[data-el="selRange"]')?.textContent, ...[...document.querySelectorAll('.combat-log li')].map((l) => l.textContent)].join(' | '))}`)
   if (state === 'ready') {
     // Zoom out with the mouse wheel to see both ships and the backdrop.
     await page.mouse.move(300, 150)

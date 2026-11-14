@@ -16,7 +16,7 @@ const app = document.querySelector<HTMLDivElement>('#app')!
 app.innerHTML = `
   <header class="site-head">
     <h1>EVE duel sandbox</h1>
-    <p>Paste a fit, then fly it against a friend with a room code. Movement works today; weapons are being built next.</p>
+    <p>Paste a fit, then fight it against a friend with a room code: locking, weapons, tank, capacitor and electronic warfare, computed from the real fit.</p>
   </header>
   <main>
     <form class="entry" id="entry">
