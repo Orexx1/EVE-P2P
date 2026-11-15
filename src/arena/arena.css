@@ -819,6 +819,12 @@ html.in-arena {
   white-space: nowrap;
 }
 
+/* Help from a friend: repairs and capacitor arriving. */
+.effects span.help {
+  background: rgb(16 46 30 / 0.9);
+  border-color: var(--go);
+}
+
 /* The ship's status: a dial with no window round it, and what the ship is doing written beside it. */
 .ship-hud {
   display: grid;
@@ -1802,6 +1808,15 @@ html.in-arena {
 @media (max-height: 30rem) {
   .hud.has-craft .combat-log li:nth-last-child(n + 4) {
     display: none;
+  }
+
+  /* The line of effects on the ship runs across where the log sits: the log moves up out of its way. */
+  .hud:has(.effects span) .log-window {
+    bottom: calc(max(0.5rem, env(safe-area-inset-bottom)) + 8.25rem);
+  }
+
+  .effects {
+    font-size: 0.75rem;
   }
 
   /* There is not the height for the drone window above the ship's status. Put away, it is its

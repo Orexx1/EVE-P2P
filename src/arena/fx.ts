@@ -50,6 +50,7 @@ const LINK_COLOUR: Record<LinkKind, string> = {
   armor: '#74f2a0',
   shield: '#73c7ff',
   hull: '#ffa25c',
+  cap: '#ffe27a',
 }
 const TAU = Math.PI * 2
 /** A repeatable scatter in 0..1, so a jagged arc holds its shape for a moment instead of boiling. */
@@ -202,6 +203,16 @@ export class FireEffects {
         }
       }
       const beam = length > 10
+      // A repair given to another ship: a steady beam with pulses running along it, and the repair itself shown on the ship being mended.
+      const mended = () => {
+        if (from === to) return a
+        ctx.lineWidth = 2.2
+        ctx.globalAlpha = 0.35
+        if (beam) path(() => 0, 1)
+        ctx.globalAlpha = 0.9
+        dots(4, 0.7, 2.2)
+        return b
+      }
 
       switch (kind) {
         case 'web': {
@@ -324,39 +335,54 @@ export class FireEffects {
         }
         case 'armor': {
           // Plates knitting: a hexagon turning round the hull, and rings drawing in to it.
+          const c = mended()
           ctx.lineWidth = 1.2
           ctx.globalAlpha = 0.55
           ctx.beginPath()
           for (let k = 0; k <= 6; k++) {
             const angle = t * 0.6 + (k * TAU) / 6
-            const x = a.x + Math.cos(angle) * 17
-            const y = a.y + Math.sin(angle) * 17
+            const x = c.x + Math.cos(angle) * 17
+            const y = c.y + Math.sin(angle) * 17
             if (k) ctx.lineTo(x, y)
             else ctx.moveTo(x, y)
           }
           ctx.stroke()
           const phase = (t * 1.2) % 1
           ctx.globalAlpha = 0.6 * phase
-          ring(a.x, a.y, 26 - 12 * phase)
+          ring(c.x, c.y, 26 - 12 * phase)
           break
         }
         case 'shield': {
           // A bubble: a faint ring with brighter arcs sliding round it.
+          const c = mended()
           ctx.lineWidth = 1
           ctx.globalAlpha = 0.25
-          ring(a.x, a.y, 21)
+          ring(c.x, c.y, 21)
           ctx.lineWidth = 2
           ctx.globalAlpha = 0.7
-          ring(a.x, a.y, 21, t * 2.2, 1)
-          ring(a.x, a.y, 21, t * 2.2 + Math.PI, 1)
+          ring(c.x, c.y, 21, t * 2.2, 1)
+          ring(c.x, c.y, 21, t * 2.2 + Math.PI, 1)
           break
         }
         case 'hull': {
           // Four braces pulsing at the corners.
+          const c = mended()
           const r = 15 + 2 * Math.sin(t * 6)
           ctx.lineWidth = 1.6
           ctx.globalAlpha = 0.75
-          for (let k = 0; k < 4; k++) ring(a.x, a.y, r, (k * TAU) / 4 + 0.45, 0.65)
+          for (let k = 0; k < 4; k++) ring(c.x, c.y, r, (k * TAU) / 4 + 0.45, 0.65)
+          break
+        }
+        case 'cap': {
+          // Charge handed over: bright beads running to the target, and a ring swelling where they arrive.
+          ctx.lineWidth = 1
+          ctx.globalAlpha = 0.45
+          if (beam) path(() => 0, 1)
+          ctx.globalAlpha = 0.95
+          dots(6, 0.9, 2)
+          const phase = (t * 1.5) % 1
+          ctx.globalAlpha = 0.7 * (1 - phase)
+          ring(b.x, b.y, 8 + 10 * phase)
           break
         }
       }

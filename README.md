@@ -56,7 +56,7 @@ joins with the code flies on the same side.
 
   | Challenge | You fly | Against |
   | --- | --- | --- |
-  | Frigate brawl | Rifter, Merlin | Incursus, Kestrel |
+  | Frigate brawl | Rifter, Merlin | Incursus, Tristan |
   | Hot drop | Vendetta, Hurricane | 2 Apocalypse, 2 Hurricane, 2 Drake, 2 Caracal |
   | Outnumbered | Vexor, Vexor | Rifter, Merlin, Incursus, Tristan, Kestrel |
   | Gate camp | Hurricane, Drake | Thorax, Rupture, Caracal, Incursus |
@@ -65,7 +65,7 @@ joins with the code flies on the same side.
   | The Angel and the Snake | Azariel, Vanquisher | Four waves of capitals: 2 dreadnoughts, 3 carriers, 2 supercarriers, then an Avatar and a dreadnought |
   | Carrier group | Thanatos, Nidhoggur | 3 Apocalypse, 2 Hurricane, 2 Drake |
   | Siege line | Moros, Naglfar, both with siege modules | 2 Revelation with siege modules, Thanatos |
-  | Titan down | Nyx, Hel | Erebus, Archon |
+  | Titan down | Nyx, Hel, with a Ninazu and a Lif in support | Erebus, Archon, Moros |
   | Clash of titans | Azariel, Vanquisher | Avatar, Erebus |
 
   A scenario can bring its enemies on in waves: each arrives 35 km out, ten
@@ -148,6 +148,19 @@ The screen is laid out the way the game's is, so a pilot knows where to look.
   titan cannot move for 30 seconds after firing, and the weapon takes minutes to
   fire again whatever becomes of the target. It will not fire at anything smaller
   than a capital. Fuel is not counted, and the lance and area doomsdays do nothing.
+- **Remote repair**: remote armor repairers, shield boosters and hull repairers
+  mend the ship they are pointed at, and a capacitor transmitter feeds it. Lock
+  a friend, make them your target, and switch the module on. Armor and hull
+  repairs land as the cycle ends and shield boosts as it starts, as in the
+  game, and both weaken past optimal range. A triage module makes a force
+  auxiliary's capital repairers several times stronger and roots it. A ship
+  that is itself in siege or triage cannot be given any of it. Helping a friend
+  is not an attack, so nothing answers it.
+- **Support ships**: a computer-flown ship fitted to help and not to fight
+  (remote repairers, no weapons) stays by whichever friend is worst hurt and
+  repairs them. Titan down gives the players a Ninazu and a Lif that do this.
+- **Every ship is fully fitted.** A test fails if any scenario or sample ship
+  has an empty slot, does not fit, or carries a module that does nothing here.
 - **Siege modules** work as fitted: a dreadnought's damage goes up tenfold and
   its repairs double, and it cannot move while one runs its five minutes.
 - **Overheating**: an overheated module gets its overload bonus (more damage or
@@ -160,7 +173,8 @@ The screen is laid out the way the game's is, so a pilot knows where to look.
   filled and online, times the hull's attenuation for every slot between the
   two. A module has 40 hit points and burns out when they are gone. Heat damage
   is taken as with Thermodynamics V. Nanite paste is not modelled, and the
-  computer's ships do not overheat.
+  computer's ships do not overheat. They do keep a quarter of their capacitor
+  back for their guns before they run a repairer.
 - **Stats follow the fit**: when a module switches on or off, the fitting engine
   recomputes the ship with exactly what is running and what is being done to it.
 - **Drones and fighters** are craft in space, not a number added to the ship's

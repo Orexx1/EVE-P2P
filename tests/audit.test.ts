@@ -88,7 +88,6 @@ describe('the fight against the fitting engine', () => {
     ['Apocalypse', () => SCENARIO_FITS.apocalypse],
     ['Omen', () => SCENARIO_FITS.omen],
     ['Drake', () => SCENARIO_FITS.drake],
-    ['Naglfar', () => SCENARIO_FITS.naglfar],
   ])("delivers the damage the engine gives a %s's guns and launchers", (_, eft) => {
     const { loaded, paper, expected, measured } = measure(eft(), 90, false)
     // What the simulation is told each weapon does adds up to the engine's own figure.
@@ -96,6 +95,19 @@ describe('the fight against the fitting engine', () => {
     // And that is what arrives: within a few percent, the rest being the luck of the rolls and the target's shield recharging.
     expect(measured / expected).toBeGreaterThan(0.94)
     expect(measured / expected).toBeLessThan(1.04)
+  })
+
+  it.each([
+    ['Moros', () => SCENARIO_FITS.moros],
+    ['Naglfar', () => SCENARIO_FITS.naglfar],
+    ['Revelation', () => SCENARIO_FITS.revelation],
+  ])("is told what a sieged %s's guns do by the engine: ten times what they do out of siege", (_, eft) => {
+    const loaded = loadFit(eft(), dataset)
+    const loadout = buildLoadout(loaded, dataset, 50)
+    const perSecond = (on: boolean) =>
+      computeStats(loadout, loaded.fit.modules.map(() => on)).modules.reduce((sum, m) => sum + (m.damage ? m.damage.reduce((a, b) => a + b, 0) / m.cycle : 0), 0)
+    expect(perSecond(true)).toBeCloseTo(loaded.stats.offense.weaponDps, 0)
+    expect(perSecond(true) / perSecond(false)).toBeGreaterThan(8)
   })
 
   it.each([

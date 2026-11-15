@@ -40,6 +40,8 @@ export type ModuleKind =
   | 'shieldBoost'
   | 'hullRep'
   | 'capBooster'
+  /** Capacitor handed to another ship. */
+  | 'capTransfer'
   | 'web'
   | 'scram'
   | 'disrupt'
@@ -97,6 +99,8 @@ export interface ModuleStats {
   affectsOwn: boolean
   /** Running it changes the target's numbers. */
   projects: boolean
+  /** Remote assistance: it helps its target, so using it is not an attack. A repairer or booster that needs a target mends that ship and not its own. */
+  assist: boolean
   /** Why it cannot be used, for 'unsupported' modules. */
   note: string
   /** How the module looks from outside while it runs, when its kind alone does not say (a painter and a dampener are both 'ewar'). */
@@ -131,7 +135,7 @@ const HEAT_DAMAGE_SKILL = 0.75
  * Something one thing in space is visibly doing to another, or to itself:
  * a web, a neutralizer, a repair cycle. Anyone on grid can see these.
  */
-export const LINK_KINDS = ['web', 'scram', 'point', 'neut', 'nos', 'ecm', 'paint', 'damp', 'track', 'armor', 'shield', 'hull'] as const
+export const LINK_KINDS = ['web', 'scram', 'point', 'neut', 'nos', 'ecm', 'paint', 'damp', 'track', 'armor', 'shield', 'hull', 'cap'] as const
 export type LinkKind = (typeof LINK_KINDS)[number]
 /** From, to (the same as from when it acts on itself), and what. */
 export type Link = [number, number, LinkKind]
@@ -146,6 +150,7 @@ const MODULE_LOOK: Partial<Record<ModuleKind, LinkKind>> = {
   armorRep: 'armor',
   shieldBoost: 'shield',
   hullRep: 'hull',
+  capTransfer: 'cap',
 }
 
 export function moduleStats(partial: Partial<ModuleStats> & Pick<ModuleStats, 'kind' | 'name'>): ModuleStats {
@@ -175,6 +180,7 @@ export function moduleStats(partial: Partial<ModuleStats> & Pick<ModuleStats, 'k
     mwd: false,
     affectsOwn: false,
     projects: false,
+    assist: false,
     note: '',
     look: '',
     position: 0,
@@ -1184,6 +1190,7 @@ export class Combat {
       if (spec.kind === 'doomsday' && (this.craft[target] || this.stats[target].signature < CAPITAL_SIGNATURE)) {
         return `${spec.name} can only be fired at a capital ship.`
       }
+      if (spec.assist && this.sealed(target)) return `${spec.name}: a ship in siege or triage cannot be given remote assistance.`
     }
     if (spec.mwd && this.under(index, 'scram')) return 'You are warp scrambled: the microwarpdrive will not start.'
     if (spec.charges > 0 && run.charges <= 0 && spec.autoReload) {
@@ -1209,7 +1216,7 @@ export class Combat {
       this.flag(index, spec, target)
       if (wasOn && before >= 0 && spec.projects) this.dirty[before] = true
     }
-    if (target >= 0) this.aggress(index, target)
+    if (target >= 0 && !spec.assist) this.aggress(index, target)
     this.onCycleStart(index, spec, run, world)
     return null
   }
@@ -1232,7 +1239,7 @@ export class Combat {
       // A cycle rarely ends exactly on a step. What it ran over by comes off the next one,
       // so a 1.24 second gun fires every 1.24 seconds on average and not every 1.3.
       const over = Math.min(0, run.left)
-      this.onCycleEnd(index, spec, run)
+      this.onCycleEnd(index, spec, run, world)
       if (!run.wanted) return this.switchOff(index, i)
       // Roll straight into the next cycle; the stats only change if it cannot.
       const refusal = this.tryStart(index, i, world, false)
@@ -1297,10 +1304,14 @@ export class Combat {
         break
       }
       case 'shieldBoost':
-        ship.hp[0] = Math.min(this.stats[index].hp[0], ship.hp[0] + spec.amount)
+        // A shield booster works as its cycle starts; a remote one works on its target, weaker past its optimal range.
+        this.mend(to >= 0 ? to : index, 0, spec.amount * (to >= 0 ? falloffFactor(distance, spec.range, spec.falloff) : 1), index)
         break
       case 'capBooster':
         ship.cap = Math.min(this.stats[index].capMax, ship.cap + spec.amount)
+        break
+      case 'capTransfer':
+        if (this.present(to) && !this.sealed(to)) this.ships[to].cap = Math.min(this.stats[to].capMax, this.ships[to].cap + spec.amount * falloffFactor(distance, spec.range, spec.falloff))
         break
       case 'neut': {
         const target = this.ships[to]
@@ -1397,11 +1408,27 @@ export class Combat {
     })
   }
 
-  private onCycleEnd(index: number, spec: ModuleStats, run: ModuleRun) {
-    const ship = this.ships[index]
+  private onCycleEnd(index: number, spec: ModuleStats, run: ModuleRun, world: World) {
     if (run.heated) this.scorch(index, this.stats[index].modules.indexOf(spec))
-    if (spec.kind === 'armorRep') ship.hp[1] = Math.min(this.stats[index].hp[1], ship.hp[1] + spec.amount * run.power)
-    if (spec.kind === 'hullRep') ship.hp[2] = Math.min(this.stats[index].hp[2], ship.hp[2] + spec.amount)
+    if (spec.kind !== 'armorRep' && spec.kind !== 'hullRep') return
+    // Armor and hull repairs land as the cycle ends. A remote one lands on its target, weaker past its optimal range.
+    const to = run.target >= 0 ? run.target : index
+    const reach = run.target >= 0 ? falloffFactor(len(sub(world.ships[index].pos, world.ships[to].pos)), spec.range, spec.falloff) : 1
+    this.mend(to, spec.kind === 'armorRep' ? 1 : 2, spec.amount * run.power * reach, index)
+  }
+
+  /**
+   * Whether a ship has shut itself off from outside help: one running a siege or
+   * triage module can be given no remote repair and no capacitor.
+   */
+  sealed(index: number): boolean {
+    return this.stats[index].modules.some((m, i) => this.ships[index].modules[i]?.on && /^(Siege|Triage) Module/.test(m.name))
+  }
+
+  /** Puts hit points back on one layer of a ship that is still there to be repaired. `from` is who is doing it, when it is not the ship itself. */
+  private mend(index: number, layer: 0 | 1 | 2, amount: number, from = index) {
+    if (!this.present(index) || (from !== index && this.sealed(index))) return
+    this.ships[index].hp[layer] = Math.min(this.stats[index].hp[layer], this.ships[index].hp[layer] + amount)
   }
 
   /**

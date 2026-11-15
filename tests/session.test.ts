@@ -4,7 +4,7 @@ import type { FittingDataset } from 'eve-fit-engine'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildDataset } from '../src/data/dataset'
 import { loadFit } from '../src/fit/loadFit'
-import { SCENARIOS, pilotFit, scenarioEnemies } from '../src/game/scenarios'
+import { SCENARIOS, pilotFit, scenarioShips } from '../src/game/scenarios'
 import { GuestSession, HostSession, loadExtras, playerFor } from '../src/game/session'
 import type { Channel } from '../src/net/room'
 
@@ -40,7 +40,7 @@ function wire() {
 function coop(id: string) {
   const scenario = SCENARIOS.find((s) => s.id === id)!
   const fits = ([0, 1] as const).map((seat) => loadFit(pilotFit(scenario, seat)!, dataset))
-  const players = () => [playerFor('Host', fits[0], 0, false), playerFor('Guest', fits[1], 0, false), ...loadExtras(scenarioEnemies(scenario), dataset)]
+  const players = () => [playerFor('Host', fits[0], 0, false), playerFor('Guest', fits[1], 0, false), ...loadExtras(scenarioShips(scenario), dataset)]
   const { host, guest, sizes } = wire()
   const hostSession = new HostSession(players(), host, 'TEST', dataset)
   const guestSession = new GuestSession(players(), guest, 'TEST', dataset)

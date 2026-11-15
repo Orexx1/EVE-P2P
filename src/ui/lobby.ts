@@ -2,7 +2,7 @@
 // or pick a scenario and fly it alone or with a friend on the same side.
 import type { FittingDataset } from 'eve-fit-engine'
 import { loadFit, type LoadedFit } from '../fit/loadFit'
-import { SCENARIOS, describeSide, hullOf, pilotFit, scenarioEnemies, type Scenario } from '../game/scenarios'
+import { SCENARIOS, describeSide, hullOf, pilotFit, scenarioShips, type Scenario } from '../game/scenarios'
 import { cleanPilot, GuestSession, handshake, HostSession, loadExtras, playerFor, type Extra, type Session, type Setup } from '../game/session'
 import { esc } from './format'
 import { hostRoom, joinRoom, normaliseCode, type HostedRoom } from '../net/room'
@@ -44,7 +44,8 @@ const ROOM_KEY = 'eve-p2p:room'
 const ROOM_KEPT_MS = 15 * 60_000
 
 function scenarioCard(scenario: Scenario): string {
-  const you = scenario.pilots ? scenario.pilots.map(hullOf).join(', ') : 'Your own fit'
+  const support = scenario.allies?.length ? `, with ${describeSide(scenario.allies)} in support` : ''
+  const you = (scenario.pilots ? scenario.pilots.map(hullOf).join(', ') : 'Your own fit') + support
   const pips = [1, 2, 3].map((n) => `<i${n <= scenario.difficulty ? ' class="on"' : ''}></i>`).join('')
   return `
     <li class="scenario" data-scenario="${scenario.id}">
@@ -223,7 +224,7 @@ export function createLobby(host: HTMLElement): Lobby {
       scenario: scenario.id,
       setup: { coop: true, title: scenario.title, brief: scenario.brief, guestEft: friend ?? undefined },
       mine: given ? { eft: given, fit: loadFit(given, dataset!) } : { eft: current!.eft, fit: current!.fit },
-      extras: scenarioEnemies(scenario),
+      extras: scenarioShips(scenario),
       wingman: friend ? { team: 0, pilot: 'Wingman', eft: friend } : null,
     }
   }

@@ -92,8 +92,9 @@ function describe(m: ModuleStats): string {
   else {
     parts.push(`${m.cycle.toFixed(1)} s cycle`)
     if (m.capNeed > 0) parts.push(`${m.capNeed.toFixed(1)} GJ`)
-    if (m.kind === 'turret') parts.push(`${formatRange(m.range)} + ${formatRange(m.falloff)}`)
+    if (m.kind === 'turret' || (m.assist && m.falloff > 0)) parts.push(`${formatRange(m.range)} + ${formatRange(m.falloff)}`)
     else if (Number.isFinite(m.range) && m.range > 0) parts.push(formatRange(m.range))
+    if (m.assist) parts.push('helps the ship you have targeted')
   }
   return parts.join(', ')
 }
@@ -1059,7 +1060,8 @@ export class Hud {
     const lockingBy = s.sights.filter((sight, i) => i !== s.me && !sight.dead && sight.lock === LOCK_LOCKING).length
     if (lockedBy) effects.unshift(lockedBy > 1 ? `Targeted by ${lockedBy}` : 'Targeted')
     else if (lockingBy) effects.unshift('Being targeted')
-    this.write(this.el.effects, effects.map((e) => `<span>${esc(e)}</span>`).join(''))
+    // Help arriving from a friend is marked apart from what the enemy is doing.
+    this.write(this.el.effects, effects.map((e) => `<span${/ being (repaired|boosted|fed)$/.test(e) ? ' class="help"' : ''}>${esc(e)}</span>`).join(''))
     this.write(this.el.room, esc(this.roomLabel()))
 
     // Modules.

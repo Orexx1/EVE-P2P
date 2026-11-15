@@ -5,8 +5,9 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { buildDataset } from '../src/data/dataset'
 import { loadFit } from '../src/fit/loadFit'
 import { SAMPLE_FITS } from '../src/fit/samples'
-import { runBot } from '../src/game/bots'
+import { isSupport, runBot } from '../src/game/bots'
 import { buildLoadout, computeStats, projects, type Loadout, type Projection } from '../src/game/loadout'
+import { SCENARIO_FITS } from '../src/game/scenarios'
 import {
   Combat,
   LOCK_LOCKED,
@@ -843,5 +844,133 @@ describe('overheating', () => {
     expect(duel.cmd(0, { c: 'mod', i: burnt, on: true })).toMatch(/burnt out/i)
     expect(duel.cmd(0, { c: 'heat', is: [burnt], on: true })).toMatch(/burnt out/i)
     expect(duel.combat.stats[0].modules[burnt]).toMatchObject({ kind: 'unsupported' })
+  })
+})
+
+describe('remote repair', () => {
+  // A triage force auxiliary, the supercarrier it looks after, and a titan shooting at them.
+  const fleet = () => new Duel([SCENARIO_FITS.ninazu, SCENARIO_FITS.nyx, SCENARIO_FITS.erebus], [0, 0, 1])
+  const armor = (duel: Duel, i: number) => duel.combat.ships[i].hp[1]
+
+  it('mends the ship it is pointed at, at the end of each cycle, and is not an attack', () => {
+    const duel = fleet()
+    const repairer = duel.index(0, 'Capital Remote Armor Repairer')
+    const spec = duel.combat.stats[0].modules[repairer]
+    expect(spec).toMatchObject({ kind: 'armorRep', needsTarget: true, assist: true })
+    expect(spec.amount).toBeGreaterThan(500)
+    expect(duel.cmd(0, { c: 'mod', i: repairer, on: true })).toMatch(/lock/i)
+
+    duel.combat.ships[1].hp[1] *= 0.5
+    const hurt = armor(duel, 1)
+    const own = armor(duel, 0)
+    duel.lock(0, 1)
+    expect(duel.cmd(0, { c: 'mod', i: repairer, on: true })).toBeNull()
+    duel.run(spec.cycle - 0.5)
+    // Armor repairs land when the cycle ends, not when it starts.
+    expect(armor(duel, 1)).toBe(hurt)
+    duel.run(1)
+    expect(armor(duel, 1) - hurt).toBeCloseTo(spec.amount, 0)
+    // It went to the patient, not to the ship doing the repairing.
+    expect(armor(duel, 0)).toBe(own)
+    expect(duel.combat.links(duel.world)).toContainEqual([0, 1, 'armor'])
+    // Repair never takes a layer past full.
+    duel.combat.ships[1].hp[1] = duel.combat.stats[1].hp[1] - 100
+    duel.run(spec.cycle + 0.2)
+    expect(armor(duel, 1)).toBe(duel.combat.stats[1].hp[1])
+  })
+
+  it('is several times stronger in triage, which roots the ship, and weaker past its optimal range', () => {
+    const duel = fleet()
+    const repairer = duel.index(0, 'Capital Remote Armor Repairer')
+    const before = duel.combat.stats[0].modules[repairer]
+    duel.cmd(0, { c: 'mod', i: duel.index(0, 'Triage Module'), on: true })
+    const after = duel.combat.stats[0].modules[repairer]
+    expect(after.amount / after.cycle).toBeGreaterThan(2.5 * (before.amount / before.cycle))
+    expect(duel.combat.stats[0].maxVelocity).toBe(0)
+
+    // Well past optimal plus falloff, a cycle mends a small part of what it would up close.
+    duel.combat.ships[1].hp[1] *= 0.5
+    duel.lock(0, 1)
+    duel.world.ships[1].pos = [duel.world.ships[0].pos[0] + after.range + 1.5 * after.falloff, duel.world.ships[0].pos[1], duel.world.ships[0].pos[2]]
+    const hurt = armor(duel, 1)
+    duel.cmd(0, { c: 'mod', i: repairer, on: true })
+    duel.run(after.cycle + 0.3)
+    const mended = armor(duel, 1) - hurt
+    expect(mended).toBeGreaterThan(0)
+    expect(mended).toBeLessThan(after.amount * 0.3)
+  })
+
+  it('boosts a shield as the cycle starts, and hands over capacitor', () => {
+    const duel = new Duel([SCENARIO_FITS.lif, SCENARIO_FITS.hel, `[Ninazu, Cap]
+Capital Remote Capacitor Transmitter II`], [0, 0, 0])
+    const booster = duel.index(0, 'Capital Remote Shield Booster')
+    const spec = duel.combat.stats[0].modules[booster]
+    expect(spec).toMatchObject({ kind: 'shieldBoost', needsTarget: true, assist: true })
+    duel.combat.ships[1].hp[0] *= 0.5
+    const hurt = duel.combat.ships[1].hp[0]
+    duel.lock(0, 1)
+    duel.cmd(0, { c: 'mod', i: booster, on: true })
+    duel.run(0.2)
+    expect(duel.combat.ships[1].hp[0] - hurt).toBeGreaterThan(spec.amount * 0.99)
+    expect(duel.combat.links(duel.world)).toContainEqual([0, 1, 'shield'])
+
+    const transmitter = duel.combat.stats[2].modules[0]
+    expect(transmitter).toMatchObject({ kind: 'capTransfer', assist: true })
+    duel.combat.ships[1].cap = 0
+    duel.lock(2, 1)
+    duel.cmd(2, { c: 'mod', i: 0, on: true })
+    duel.run(0.2)
+    expect(duel.combat.ships[1].cap).toBeGreaterThan(transmitter.amount * 0.9)
+  })
+
+  it('has the computer fly a force auxiliary as support: it keeps a friend under fire alive', () => {
+    const fight = (support: boolean) => {
+      const duel = new Duel(support ? [SCENARIO_FITS.nyx, SCENARIO_FITS.erebus, SCENARIO_FITS.ninazu] : [SCENARIO_FITS.nyx, SCENARIO_FITS.erebus], support ? [0, 1, 0] : [0, 1], 5)
+      if (support) expect(isSupport(duel.combat.stats[2])).toBe(true)
+      expect(isSupport(duel.combat.stats[0])).toBe(false)
+      // The supercarrier does nothing but take it; the titan shoots; the auxiliary does what it does.
+      duel.run(150, support ? [1, 2] : [1])
+      return duel
+    }
+    // Alone, the titan's doomsday and guns finish the supercarrier inside two and a half minutes. Repaired, it is still there.
+    const alone = fight(false)
+    const helped = fight(true)
+    expect(alone.combat.ships[0].dead).toBe(true)
+    expect(helped.combat.ships[0].dead).toBe(false)
+    // It locked its friend, went into triage and never touched the enemy.
+    expect(lockState(helped.combat.ships[2], 0)).toBe(LOCK_LOCKED)
+    expect(helped.combat.ships[2].modules[helped.index(2, 'Triage Module')].on).toBe(true)
+    expect(lockState(helped.combat.ships[2], 1)).not.toBe(LOCK_LOCKED)
+  })
+
+  it('cannot reach a ship in siege or triage', () => {
+    const duel = new Duel([SCENARIO_FITS.ninazu, SCENARIO_FITS.moros, SCENARIO_FITS.lif], [0, 0, 0])
+    const repairer = duel.index(0, 'Capital Remote Armor Repairer')
+    duel.combat.ships[1].hp[1] *= 0.5
+    const hurt = armor(duel, 1)
+    duel.lock(0, 1)
+    // Already repairing when the dreadnought sieges: the cycles go on, and do nothing.
+    duel.cmd(0, { c: 'mod', i: repairer, on: true })
+    duel.cmd(1, { c: 'mod', i: duel.index(1, 'Siege Module'), on: true })
+    duel.run(duel.combat.stats[0].modules[repairer].cycle * 2 + 0.3)
+    expect(armor(duel, 1)).toBe(hurt)
+    duel.cmd(0, { c: 'mod', i: repairer, on: false })
+    duel.run(duel.combat.stats[0].modules[repairer].cycle + 0.3)
+    expect(duel.cmd(0, { c: 'mod', i: repairer, on: true })).toMatch(/siege or triage/)
+    // The computer's support ship does not waste itself on one either.
+    duel.combat.ships[0].hp[1] *= 0.5
+    duel.cmd(0, { c: 'mod', i: duel.index(0, 'Triage Module'), on: true })
+    duel.run(30, [2])
+    expect(duel.combat.ships[2].locks).toEqual([])
+  })
+
+  it('leaves a fighting ship\'s own remote repairer alone: its target is the enemy', () => {
+    const duel = new Duel([`[Apocalypse, Spare repairer]
+Mega Pulse Laser II, Scorch L
+Large Remote Armor Repairer II`, 'Rifter'], [0, 1])
+    duel.run(40, [0])
+    const repairer = duel.index(0, 'Remote Armor Repairer')
+    expect(duel.combat.ships[0].modules[repairer].wanted).toBe(false)
+    expect(duel.combat.ships[0].modules[duel.index(0, 'Mega Pulse')].on).toBe(true)
   })
 })

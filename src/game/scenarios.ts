@@ -30,7 +30,11 @@ X5 Enduring Stasis Webifier
 
 Light Ion Blaster II, Void S
 Light Ion Blaster II, Void S
-Light Ion Blaster II, Void S`,
+Light Ion Blaster II, Void S
+
+Small Trimark Armor Pump I
+Small Trimark Armor Pump I
+Small Auxiliary Nano Pump I`,
   punisher: `[Punisher, Pulse brawler]
 Damage Control II
 Small Armor Repairer II
@@ -43,7 +47,12 @@ Initiated Compact Warp Scrambler
 
 Small Focused Pulse Laser II, Conflagration S
 Small Focused Pulse Laser II, Conflagration S
-Small Focused Pulse Laser II, Conflagration S`,
+Small Focused Pulse Laser II, Conflagration S
+Small Energy Neutralizer II
+
+Small Trimark Armor Pump I
+Small Trimark Armor Pump I
+Small Auxiliary Nano Pump I`,
   kestrel: `[Kestrel, Rocket brawler]
 Damage Control II
 Ballistic Control System II
@@ -56,7 +65,11 @@ Small Shield Extender II
 Rocket Launcher II, Scourge Rage Rocket
 Rocket Launcher II, Scourge Rage Rocket
 Rocket Launcher II, Scourge Rage Rocket
-Rocket Launcher II, Scourge Rage Rocket`,
+Rocket Launcher II, Scourge Rage Rocket
+
+Small Core Defense Field Extender I
+Small Core Defense Field Extender I
+Small Core Defense Field Extender I`,
   tristan: `[Tristan, Drone brawler]
 Damage Control II
 Drone Damage Amplifier II
@@ -69,6 +82,11 @@ X5 Enduring Stasis Webifier
 Light Ion Blaster II, Void S
 Light Ion Blaster II, Void S
 Small Energy Neutralizer II
+
+Small Trimark Armor Pump I
+Small Trimark Armor Pump I
+Small Trimark Armor Pump I
+
 
 Hobgoblin II x5`,
   thorax: `[Thorax, Blaster brawler]
@@ -89,6 +107,11 @@ Heavy Electron Blaster II, Void M
 Heavy Electron Blaster II, Void M
 Heavy Electron Blaster II, Void M
 
+Medium Trimark Armor Pump I
+Medium Trimark Armor Pump I
+Medium Trimark Armor Pump I
+
+
 Hammerhead II x5`,
   omen: `[Omen, Pulse brawler]
 Damage Control II
@@ -105,7 +128,12 @@ Stasis Webifier II
 Focused Medium Pulse Laser II, Scorch M
 Focused Medium Pulse Laser II, Scorch M
 Focused Medium Pulse Laser II, Scorch M
-Focused Medium Pulse Laser II, Scorch M`,
+Focused Medium Pulse Laser II, Scorch M
+Medium Energy Neutralizer II
+
+Medium Trimark Armor Pump I
+Medium Trimark Armor Pump I
+Medium Auxiliary Nano Pump I`,
   rupture: `[Rupture, Autocannon brawler]
 Damage Control II
 Gyrostabilizer II
@@ -122,7 +150,11 @@ Medium Capacitor Booster II, Navy Cap Booster 800
 425mm AutoCannon II, Republic Fleet EMP M
 425mm AutoCannon II, Republic Fleet EMP M
 425mm AutoCannon II, Republic Fleet EMP M
-Medium Energy Neutralizer II`,
+Medium Energy Neutralizer II
+
+Medium Trimark Armor Pump I
+Medium Trimark Armor Pump I
+Medium Trimark Armor Pump I`,
   hurricane: `[Hurricane, Autocannon brawler]
 Damage Control II
 Gyrostabilizer II
@@ -144,11 +176,17 @@ Medium Capacitor Booster II, Navy Cap Booster 800
 425mm AutoCannon II, Republic Fleet EMP M
 Small Energy Neutralizer II
 
+Medium Trimark Armor Pump I
+Medium Trimark Armor Pump I
+Medium Trimark Armor Pump I
+
+
 Hammerhead II x3`,
   drake: `[Drake, Heavy missiles]
 Damage Control II
 Ballistic Control System II
 Ballistic Control System II
+Co-Processor II
 
 10MN Afterburner II
 Large Shield Extender II
@@ -163,6 +201,12 @@ Heavy Missile Launcher II, Scourge Fury Heavy Missile
 Heavy Missile Launcher II, Scourge Fury Heavy Missile
 Heavy Missile Launcher II, Scourge Fury Heavy Missile
 Heavy Missile Launcher II, Scourge Fury Heavy Missile
+Small Energy Neutralizer II
+
+Medium Core Defense Field Extender I
+Medium Core Defense Field Extender I
+Medium Core Defense Field Extender I
+
 
 Hobgoblin II x5`,
   apocalypse: `[Apocalypse, Pulse battleship]
@@ -177,6 +221,7 @@ Multispectrum Energized Membrane II
 100MN Afterburner II
 Heavy Capacitor Booster II, Navy Cap Booster 800
 Heavy Stasis Grappler II
+Tracking Computer II
 
 Mega Pulse Laser II, Scorch L
 Mega Pulse Laser II, Scorch L
@@ -186,8 +231,225 @@ Mega Pulse Laser II, Scorch L
 Mega Pulse Laser II, Scorch L
 Mega Pulse Laser II, Scorch L
 Mega Pulse Laser II, Scorch L
+
+Large Trimark Armor Pump I
+Large Trimark Armor Pump I
+Large Processor Overclocking Unit I
+
 
 Warrior II x5`,
+  // Dreadnoughts. A siege module is ten times the damage and twice the repair, and the ship cannot move while it runs.
+  moros: `[Moros, Siege]
+Damage Control II
+Magnetic Field Stabilizer II
+Magnetic Field Stabilizer II
+Capital Armor Repairer II
+25000mm Steel Plates II
+Multispectrum Energized Membrane II
+Multispectrum Energized Membrane II
+Multispectrum Coating II
+
+10000MN Afterburner II
+Capital Capacitor Booster II, Navy Cap Booster 3200
+Heavy Stasis Grappler II
+Tracking Computer II
+
+Ion Siege Blaster II, Void XL
+Ion Siege Blaster II, Void XL
+Ion Siege Blaster II, Void XL
+Siege Module II
+Heavy Energy Neutralizer II
+
+Capital Trimark Armor Pump II
+Capital Trimark Armor Pump II
+Capital Trimark Armor Pump II`,
+  naglfar: `[Naglfar, Siege]
+Damage Control II
+Gyrostabilizer II
+Gyrostabilizer II
+Tracking Enhancer II
+Co-Processor II
+
+10000MN Afterburner II
+Capital Shield Booster II
+Capital Shield Extender II
+Multispectrum Shield Hardener II
+Multispectrum Shield Hardener II
+Heavy Capacitor Booster II, Navy Cap Booster 800
+Sensor Booster II
+
+Hexa 2500mm Repeating Cannon II, Republic Fleet EMP XL
+Hexa 2500mm Repeating Cannon II, Republic Fleet EMP XL
+Hexa 2500mm Repeating Cannon II, Republic Fleet EMP XL
+Siege Module II
+Heavy Energy Neutralizer II
+
+Capital Core Defense Field Extender II
+Capital Core Defense Field Extender II
+Capital Core Defense Field Extender II`,
+  revelation: `[Revelation, Siege]
+Damage Control II
+Heat Sink II
+Heat Sink II
+Capital Armor Repairer II
+Multispectrum Energized Membrane II
+Multispectrum Energized Membrane II
+Multispectrum Coating II
+Multispectrum Coating II
+
+10000MN Afterburner II
+Capital Capacitor Booster II, Navy Cap Booster 3200
+Tracking Computer II
+Sensor Booster II
+
+Dual Giga Pulse Laser II, Scorch XL
+Dual Giga Pulse Laser II, Scorch XL
+Dual Giga Pulse Laser II, Scorch XL
+Siege Module II
+Heavy Energy Neutralizer II
+
+Capital Trimark Armor Pump II
+Capital Trimark Armor Pump II
+Capital Trimark Armor Pump II`,
+  // Carriers: light fighters, neutralizers for whatever gets close, and a repairer of their own.
+  thanatos: `[Thanatos, Fighters]
+Damage Control II
+Drone Damage Amplifier II
+Drone Damage Amplifier II
+25000mm Steel Plates II
+Multispectrum Energized Membrane II
+Capital Armor Repairer II
+
+10000MN Afterburner II
+Sensor Booster II
+Capital Capacitor Booster II, Navy Cap Booster 3200
+Omnidirectional Tracking Link II
+Drone Navigation Computer II
+
+Fighter Support Unit II
+Fighter Support Unit II
+Networked Sensor Array
+Heavy Energy Neutralizer II
+Heavy Energy Neutralizer II
+
+Capital Trimark Armor Pump II
+Capital Trimark Armor Pump II
+Capital Trimark Armor Pump II
+
+
+Firbolg II x18`,
+  archon: `[Archon, Fighters]
+Damage Control II
+Drone Damage Amplifier II
+Drone Damage Amplifier II
+25000mm Steel Plates II
+Multispectrum Energized Membrane II
+Multispectrum Energized Membrane II
+Capital Armor Repairer II
+
+10000MN Afterburner II
+Sensor Booster II
+Capital Capacitor Booster II, Navy Cap Booster 3200
+Cap Recharger II
+
+Fighter Support Unit II
+Fighter Support Unit II
+Networked Sensor Array
+Heavy Energy Neutralizer II
+Heavy Energy Neutralizer II
+
+Capital Trimark Armor Pump II
+Capital Trimark Armor Pump II
+Capital Trimark Armor Pump II
+
+
+Templar II x18`,
+  nidhoggur: `[Nidhoggur, Fighters]
+Damage Control II
+Drone Damage Amplifier II
+Drone Damage Amplifier II
+Co-Processor II
+Co-Processor II
+
+10000MN Afterburner II
+Capital Shield Booster II
+Capital Shield Extender II
+Multispectrum Shield Hardener II
+Multispectrum Shield Hardener II
+Capital Capacitor Booster II, Navy Cap Booster 3200
+
+Fighter Support Unit II
+Fighter Support Unit II
+Networked Sensor Array
+Heavy Energy Neutralizer II
+Heavy Energy Neutralizer II
+
+Capital Core Defense Field Extender II
+Capital Core Defense Field Extender II
+Capital Core Defense Field Extender II
+
+
+Einherji II x18`,
+  // Supercarriers: a buffer deep enough to take a doomsday, a repairer and a cap booster to keep going after it, and neutralizers.
+  nyx: `[Nyx, Fleet]
+Damage Control II
+Drone Damage Amplifier II
+Drone Damage Amplifier II
+25000mm Steel Plates II
+Multispectrum Energized Membrane II
+Multispectrum Energized Membrane II
+Capital Armor Repairer II
+
+10000MN Afterburner II
+Sensor Booster II
+Capital Capacitor Booster II, Navy Cap Booster 3200
+Omnidirectional Tracking Link II
+Drone Navigation Computer II
+
+Fighter Support Unit II
+Fighter Support Unit II
+Capital Energy Neutralizer II
+Capital Energy Neutralizer II
+Heavy Energy Neutralizer II
+Heavy Energy Neutralizer II
+
+Capital Trimark Armor Pump II
+Capital Trimark Armor Pump II
+Capital Trimark Armor Pump II
+
+
+Firbolg II x18
+Cyclops II x12`,
+  hel: `[Hel, Fleet]
+Damage Control II
+Drone Damage Amplifier II
+Drone Damage Amplifier II
+Co-Processor II
+Co-Processor II
+
+10000MN Afterburner II
+Capital Shield Extender II
+Capital Shield Extender II
+Multispectrum Shield Hardener II
+Multispectrum Shield Hardener II
+Capital Shield Booster II
+Capital Capacitor Booster II, Navy Cap Booster 3200
+
+Fighter Support Unit II
+Fighter Support Unit II
+Capital Energy Neutralizer II
+Capital Energy Neutralizer II
+Heavy Energy Neutralizer II
+Heavy Energy Neutralizer II
+
+Capital Core Defense Field Extender II
+Capital Core Defense Field Extender II
+Capital Core Defense Field Extender II
+
+
+Einherji II x18
+Tyrfing II x12`,
+  // Titans.
   azariel: `[Azariel, The Angel]
 Damage Control II
 Gyrostabilizer II
@@ -222,10 +484,10 @@ Damage Control II
 Magnetic Field Stabilizer II
 Magnetic Field Stabilizer II
 25000mm Steel Plates II
+25000mm Steel Plates II
 Capital Armor Repairer II
 Multispectrum Energized Membrane II
 Multispectrum Energized Membrane II
-25000mm Steel Plates II
 
 10000MN Afterburner II
 Capital Capacitor Booster II, Navy Cap Booster 3200
@@ -246,128 +508,21 @@ Heavy Energy Neutralizer II
 Capital Trimark Armor Pump II
 Capital Trimark Armor Pump II
 Capital Trimark Armor Pump II`,
-  naglfar: `[Naglfar, Gauntlet]
-Damage Control II
-Gyrostabilizer II
-Gyrostabilizer II
-
-10000MN Afterburner II
-Capital Shield Extender II
-Capital Shield Extender II
-Multispectrum Shield Hardener II
-
-Hexa 2500mm Repeating Cannon II, Republic Fleet EMP XL
-Hexa 2500mm Repeating Cannon II, Republic Fleet EMP XL
-Hexa 2500mm Repeating Cannon II, Republic Fleet EMP XL`,
-  moros: `[Moros, Gauntlet]
-Damage Control II
-Magnetic Field Stabilizer II
-Magnetic Field Stabilizer II
-25000mm Steel Plates II
-Multispectrum Energized Membrane II
-
-10000MN Afterburner II
-Heavy Stasis Grappler II
-
-Ion Siege Blaster II, Void XL
-Ion Siege Blaster II, Void XL
-Ion Siege Blaster II, Void XL`,
-  revelation: `[Revelation, Gauntlet]
-Damage Control II
-Heat Sink II
-Heat Sink II
-25000mm Steel Plates II
-Multispectrum Energized Membrane II
-
-10000MN Afterburner II
-
-Dual Giga Pulse Laser II, Scorch XL
-Dual Giga Pulse Laser II, Scorch XL
-Dual Giga Pulse Laser II, Scorch XL`,
-  thanatos: `[Thanatos, Gauntlet]
-Damage Control II
-Drone Damage Amplifier II
-Drone Damage Amplifier II
-25000mm Steel Plates II
-
-10000MN Afterburner II
-Sensor Booster II
-
-Fighter Support Unit II
-
-
-Firbolg II x18`,
-  archon: `[Archon, Gauntlet]
-Damage Control II
-Drone Damage Amplifier II
-Drone Damage Amplifier II
-25000mm Steel Plates II
-
-10000MN Afterburner II
-Sensor Booster II
-
-Fighter Support Unit II
-
-
-Templar II x18`,
-  nidhoggur: `[Nidhoggur, Gauntlet]
-Damage Control II
-Drone Damage Amplifier II
-Drone Damage Amplifier II
-
-10000MN Afterburner II
-Capital Shield Extender II
-Multispectrum Shield Hardener II
-
-Fighter Support Unit II
-
-
-Einherji II x18`,
-  nyx: `[Nyx, Gauntlet]
-Damage Control II
-Drone Damage Amplifier II
-Drone Damage Amplifier II
-25000mm Steel Plates II
-Multispectrum Energized Membrane II
-
-10000MN Afterburner II
-Sensor Booster II
-
-Fighter Support Unit II
-Fighter Support Unit II
-
-
-Firbolg II x18
-Cyclops II x12`,
-  hel: `[Hel, Gauntlet]
-Damage Control II
-Drone Damage Amplifier II
-Drone Damage Amplifier II
-
-10000MN Afterburner II
-Capital Shield Extender II
-Capital Shield Extender II
-Multispectrum Shield Hardener II
-
-Fighter Support Unit II
-Fighter Support Unit II
-
-
-Einherji II x18
-Tyrfing II x12`,
-  avatar: `[Avatar, Gauntlet]
+  avatar: `[Avatar, Titan]
 Damage Control II
 Heat Sink II
 Heat Sink II
 25000mm Steel Plates II
 25000mm Steel Plates II
 Multispectrum Energized Membrane II
-Multispectrum Energized Membrane II
+Multispectrum Coating II
 Capital Armor Repairer II
 
 10000MN Afterburner II
 Capital Capacitor Booster II, Navy Cap Booster 3200
 Sensor Booster II
+Tracking Computer II
+Heavy Stasis Grappler II
 
 Dual Giga Pulse Laser II, Scorch XL
 Dual Giga Pulse Laser II, Scorch XL
@@ -376,120 +531,26 @@ Dual Giga Pulse Laser II, Scorch XL
 Dual Giga Pulse Laser II, Scorch XL
 Dual Giga Pulse Laser II, Scorch XL
 'Judgment' Electromagnetic Doomsday
+Heavy Energy Neutralizer II
 
 Capital Trimark Armor Pump II
 Capital Trimark Armor Pump II
-Capital Trimark Armor Pump II`,
-  // Dreadnoughts with siege modules: ten times the damage and twice the repair, and they cannot move while sieged.
-  morosSiege: `[Moros, Siege]
-Damage Control II
-Magnetic Field Stabilizer II
-Magnetic Field Stabilizer II
-Capital Armor Repairer II
-25000mm Steel Plates II
-Multispectrum Energized Membrane II
-Multispectrum Energized Membrane II
-
-10000MN Afterburner II
-Capital Capacitor Booster II, Navy Cap Booster 3200
-Heavy Stasis Grappler II
-Tracking Computer II
-
-Ion Siege Blaster II, Void XL
-Ion Siege Blaster II, Void XL
-Ion Siege Blaster II, Void XL
-Siege Module II
-Heavy Energy Neutralizer II`,
-  naglfarSiege: `[Naglfar, Siege]
-Damage Control II
-Gyrostabilizer II
-Gyrostabilizer II
-Tracking Enhancer II
-
-10000MN Afterburner II
-Capital Shield Booster II
-Capital Shield Extender II
-Multispectrum Shield Hardener II
-Multispectrum Shield Hardener II
-
-Hexa 2500mm Repeating Cannon II, Republic Fleet EMP XL
-Hexa 2500mm Repeating Cannon II, Republic Fleet EMP XL
-Hexa 2500mm Repeating Cannon II, Republic Fleet EMP XL
-Siege Module II`,
-  revelationSiege: `[Revelation, Siege]
-Damage Control II
-Heat Sink II
-Heat Sink II
-Capital Armor Repairer II
-Multispectrum Energized Membrane II
-Multispectrum Energized Membrane II
-
-10000MN Afterburner II
-Capital Capacitor Booster II, Navy Cap Booster 3200
-Tracking Computer II
-
-Dual Giga Pulse Laser II, Scorch XL
-Dual Giga Pulse Laser II, Scorch XL
-Dual Giga Pulse Laser II, Scorch XL
-Siege Module II`,
-  // Supercarriers with a full buffer, for flying against a titan: one doomsday must not be the end of them.
-  nyxFleet: `[Nyx, Fleet]
-Damage Control II
-Drone Damage Amplifier II
-Drone Damage Amplifier II
-25000mm Steel Plates II
-25000mm Steel Plates II
-Multispectrum Energized Membrane II
-Multispectrum Energized Membrane II
-
-10000MN Afterburner II
-Sensor Booster II
-
-Fighter Support Unit II
-Fighter Support Unit II
-
-Capital Trimark Armor Pump II
-Capital Trimark Armor Pump II
-Capital Trimark Armor Pump II
-
-
-Firbolg II x18
-Cyclops II x12`,
-  helFleet: `[Hel, Fleet]
-Damage Control II
-Drone Damage Amplifier II
-Drone Damage Amplifier II
-
-10000MN Afterburner II
-Capital Shield Extender II
-Capital Shield Extender II
-Capital Shield Extender II
-Multispectrum Shield Hardener II
-Multispectrum Shield Hardener II
-
-Fighter Support Unit II
-Fighter Support Unit II
-
-Capital Core Defense Field Extender II
-Capital Core Defense Field Extender II
-Capital Core Defense Field Extender II
-
-
-Einherji II x18
-Tyrfing II x12`,
+Capital Processor Overclocking Unit I`,
   erebus: `[Erebus, Titan]
 Damage Control II
 Magnetic Field Stabilizer II
 Magnetic Field Stabilizer II
 25000mm Steel Plates II
 Multispectrum Energized Membrane II
-Multispectrum Energized Membrane II
+Multispectrum Coating II
 Capital Armor Repairer II
 
 10000MN Afterburner II
 Capital Capacitor Booster II, Navy Cap Booster 3200
 Sensor Booster II
 Tracking Computer II
+Heavy Stasis Grappler II
+Stasis Webifier II
 
 Ion Siege Blaster II, Void XL
 Ion Siege Blaster II, Void XL
@@ -498,10 +559,60 @@ Ion Siege Blaster II, Void XL
 Ion Siege Blaster II, Void XL
 Ion Siege Blaster II, Void XL
 'Aurora Ominae' Thermal Doomsday
+Heavy Energy Neutralizer II
 
 Capital Trimark Armor Pump II
 Capital Trimark Armor Pump II
 Capital Trimark Armor Pump II`,
+  // Force auxiliaries: no weapons. In triage they repair a friend several times faster than any ship can repair itself, and cannot move.
+  ninazu: `[Ninazu, Triage]
+Damage Control II
+Capital Armor Repairer II
+Multispectrum Energized Membrane II
+Multispectrum Energized Membrane II
+Reactor Control Unit II
+Capacitor Power Relay II
+
+Capital Capacitor Booster II, Navy Cap Booster 3200
+Capital Capacitor Booster II, Navy Cap Booster 3200
+Sensor Booster II
+Cap Recharger II
+Cap Recharger II
+
+Capital Remote Armor Repairer II
+Capital Remote Armor Repairer II
+Capital Remote Armor Repairer II
+Triage Module II
+Large Remote Armor Repairer II
+Large Remote Armor Repairer II
+
+Capital Trimark Armor Pump II
+Capital Remote Repair Augmentor II
+Capital Remote Repair Augmentor II`,
+  lif: `[Lif, Triage]
+Damage Control II
+Co-Processor II
+Co-Processor II
+Co-Processor II
+Power Diagnostic System II
+
+Capital Shield Extender II
+Capital Shield Extender II
+Multispectrum Shield Hardener II
+Multispectrum Shield Hardener II
+Capital Capacitor Booster II, Navy Cap Booster 3200
+Capital Capacitor Booster II, Navy Cap Booster 3200
+
+Capital Remote Shield Booster II
+Capital Remote Shield Booster II
+Capital Remote Shield Booster II
+Triage Module II
+Large Remote Shield Booster II
+Large Remote Shield Booster II
+
+Capital Core Defense Field Extender II
+Capital Remote Repair Augmentor II
+Capital Remote Repair Augmentor II`,
 } satisfies Record<string, string>
 
 export type FitKey = keyof typeof SCENARIO_FITS
@@ -530,6 +641,8 @@ export interface Scenario {
   difficulty: 1 | 2 | 3
   /** Challenges only: the ship the first pilot flies, and the ship their friend (or a computer wingman) flies. */
   pilots?: [FitKey, FitKey]
+  /** Computer-flown ships on the players' side: support, such as a force auxiliary that repairs them. */
+  allies?: ScenarioShip[]
   enemies: ScenarioShip[]
 }
 
@@ -546,7 +659,7 @@ export const SCENARIOS: Scenario[] = [
     pilots: ['rifter', 'merlin'],
     enemies: [
       { fit: 'incursus', name: 'Incursus' },
-      { fit: 'kestrel', name: 'Kestrel' },
+      { fit: 'tristan', name: 'Tristan' },
     ],
   },
   {
@@ -648,25 +761,30 @@ export const SCENARIOS: Scenario[] = [
   {
     id: 'siege',
     title: 'Siege line',
-    brief: 'Dreadnought against dreadnought. A siege module multiplies your damage tenfold and doubles your repairs, and roots you to the spot for five minutes: get into range before you commit.',
+    brief: 'Dreadnought against dreadnought. A siege module multiplies your damage tenfold and doubles your repairs, and roots you to the spot for five minutes: get into range before you commit. A repairer run without pause will empty your capacitor, and guns need capacitor too.',
     kind: 'challenge',
     difficulty: 2,
-    pilots: ['morosSiege', 'naglfarSiege'],
+    pilots: ['moros', 'naglfar'],
     enemies: [
-      { fit: 'revelationSiege', name: 'Revelation', count: 2 },
+      { fit: 'revelation', name: 'Revelation', count: 2 },
       { fit: 'thanatos', name: 'Thanatos' },
     ],
   },
   {
     id: 'titandown',
     title: 'Titan down',
-    brief: 'Two supercarriers hunting an Erebus and the carrier escorting it. Ten squadrons, heavy and light. The titan will answer with a doomsday every four minutes, and one of you will be on the end of it.',
+    brief: 'Two supercarriers hunting an Erebus and its escort. A Ninazu and a Lif go into triage beside you and repair whoever is worst hurt: stay within their reach, and keep the dreadnought off them. The titan fires a doomsday every four minutes. Drain its capacitor and its guns fall silent.',
     kind: 'challenge',
     difficulty: 3,
-    pilots: ['nyxFleet', 'helFleet'],
+    pilots: ['nyx', 'hel'],
+    allies: [
+      { fit: 'ninazu', name: 'Ninazu' },
+      { fit: 'lif', name: 'Lif' },
+    ],
     enemies: [
       { fit: 'erebus', name: 'Erebus' },
       { fit: 'archon', name: 'Archon' },
+      { fit: 'moros', name: 'Moros' },
     ],
   },
   {
@@ -750,8 +868,8 @@ export const SCENARIOS: Scenario[] = [
     kind: 'sandbox',
     difficulty: 3,
     enemies: [
-      { fit: 'morosSiege', name: 'Moros' },
-      { fit: 'naglfarSiege', name: 'Naglfar' },
+      { fit: 'moros', name: 'Moros' },
+      { fit: 'naglfar', name: 'Naglfar' },
     ],
   },
   {
@@ -781,19 +899,21 @@ export function pilotFit(scenario: Scenario, seat: 0 | 1): string | null {
   return scenario.pilots ? SCENARIO_FITS[scenario.pilots[seat]] : null
 }
 
-/** The computer's ships in a scenario, as extras for a session. Several of one kind are numbered. */
-export function scenarioEnemies(scenario: Scenario): Extra[] {
-  return scenario.enemies.flatMap((ship) => {
-    const count = ship.count ?? 1
-    return Array.from({ length: count }, (_, n) => ({
-      team: 1,
-      pilot: count > 1 ? `${ship.name} ${n + 1}` : ship.name,
-      eft: eftOf(ship.fit),
-      behaviour: ship.behaviour,
-      at: ship.at,
-      wave: ship.wave,
-    }))
-  })
+/** The computer's ships in a scenario, as extras for a session: the players' support first, then the enemy. Several of one kind are numbered. */
+export function scenarioShips(scenario: Scenario): Extra[] {
+  const side = (ships: ScenarioShip[], team: number) =>
+    ships.flatMap((ship) => {
+      const count = ship.count ?? 1
+      return Array.from({ length: count }, (_, n) => ({
+        team,
+        pilot: count > 1 ? `${ship.name} ${n + 1}` : ship.name,
+        eft: eftOf(ship.fit),
+        behaviour: ship.behaviour,
+        at: ship.at,
+        wave: ship.wave,
+      }))
+    })
+  return [...side(scenario.allies ?? [], 0), ...side(scenario.enemies, 1)]
 }
 
 /** "Incursus, Punisher, 2 Drake": what a side is made of, for the scenario list. */

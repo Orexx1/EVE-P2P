@@ -7,7 +7,8 @@ import { dnaFor } from '../src/data/models'
 import { loadFit } from '../src/fit/loadFit'
 import { runBot } from '../src/game/bots'
 import { buildLoadout, computeStats, projects, type Projection } from '../src/game/loadout'
-import { SCENARIO_FITS, SCENARIOS, pilotFit, scenarioEnemies } from '../src/game/scenarios'
+import { SAMPLE_FITS } from '../src/fit/samples'
+import { SCENARIO_FITS, SCENARIOS, pilotFit, scenarioShips } from '../src/game/scenarios'
 import { MAX_EXTRAS } from '../src/game/session'
 import { Combat, LOCK_LOCKED, lockState } from '../src/sim/combat'
 import { dist } from '../src/sim/vec'
@@ -69,14 +70,25 @@ describe('scenarios', () => {
     expect(dnaFor(fit.fit.shipTypeID)).toBeTruthy()
   })
 
+  // No ship is handed to a player, or sent against one, half fitted: every slot is filled,
+  // it all fits, and every module in it does something in a fight here.
+  it.each([...Object.entries(SCENARIO_FITS), ...SAMPLE_FITS.map((s) => [`sample ${s.label}`, s.eft] as [string, string])])('fits the %s out in full', (_, eft) => {
+    const fit = loadFit(eft, dataset)
+    expect(fit.problems.map((p) => p.message)).toEqual([])
+    const slots = (fit.stats.fitting as unknown as { slots: Record<string, { used: number; max: number }> }).slots
+    for (const rack of ['HI', 'MED', 'LO', 'RIG']) expect(`${rack} ${slots[rack].used}/${slots[rack].max}`).toBe(`${rack} ${slots[rack].max}/${slots[rack].max}`)
+    const stats = computeStats(buildLoadout(fit, dataset, 50), fit.fit.modules.map(() => true))
+    expect(stats.modules.filter((m) => m.kind === 'unsupported').map((m) => m.name)).toEqual([])
+  })
+
   it('gives every scenario ships that load, within what a session can carry', () => {
     const ids = new Set(SCENARIOS.map((s) => s.id))
     expect(ids.size).toBe(SCENARIOS.length)
     for (const scenario of SCENARIOS) {
-      const enemies = scenarioEnemies(scenario)
-      // Flown alone, a challenge adds a wingman to the enemies.
+      const enemies = scenarioShips(scenario)
+      // Flown alone, a challenge adds a wingman to the computer's ships.
       expect(enemies.length + 1, scenario.id).toBeLessThanOrEqual(MAX_EXTRAS)
-      expect(enemies.length, scenario.id).toBeGreaterThan(0)
+      expect(enemies.filter((e) => e.team === 1).length, scenario.id).toBeGreaterThan(0)
       for (const enemy of enemies) {
         const fit = loadFit(enemy.eft, dataset)
         expect(dnaFor(fit.fit.shipTypeID), `${scenario.id}: ${enemy.pilot}`).toBeTruthy()
@@ -87,9 +99,9 @@ describe('scenarios', () => {
   })
 
   it.each(SCENARIOS.filter((s) => s.kind === 'challenge'))('can be won and can be lost: $title', (scenario) => {
-    const enemies = scenarioEnemies(scenario)
+    const enemies = scenarioShips(scenario)
     const fits = [pilotFit(scenario, 0)!, pilotFit(scenario, 1)!, ...enemies.map((e) => e.eft)]
-    const teams = [0, 0, ...enemies.map(() => 1)]
+    const teams = [0, 0, ...enemies.map((e) => e.team)]
     const result = play(fits, teams, fits.map(() => false), 3_600, [0, 0, ...enemies.map((e) => e.wave ?? 0)])
     // With the computer flying both sides the same simple way, it comes to a decision.
     expect(result.winner, scenario.id).not.toBeNull()
@@ -97,7 +109,7 @@ describe('scenarios', () => {
 
   it('brings each wave on only when the one before is destroyed, and the last wave decides it', () => {
     const scenario = SCENARIOS.find((s) => s.id === 'titans')!
-    const enemies = scenarioEnemies(scenario)
+    const enemies = scenarioShips(scenario)
     expect(enemies.map((e) => e.wave ?? 0)).toEqual([0, 0, 1, 1, 1, 2, 2, 3, 3])
     const fits = [pilotFit(scenario, 0)!, pilotFit(scenario, 1)!, ...enemies.map((e) => e.eft)]
     const result = play(fits, [0, 0, ...enemies.map(() => 1)], fits.map(() => false), 3_600, [0, 0, ...enemies.map((e) => e.wave ?? 0)])

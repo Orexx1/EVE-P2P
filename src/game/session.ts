@@ -286,6 +286,13 @@ export interface Sight {
 
 export type Result = 'won' | 'lost' | 'draw'
 
+/** What a pilot is told when a friend's remote assistance is on them. */
+const ASSIST_LABEL: Partial<Record<ModuleStats['kind'], string>> = {
+  armorRep: 'Armor being repaired',
+  shieldBoost: 'Shield being boosted',
+  hullRep: 'Hull being repaired',
+  capTransfer: 'Capacitor being fed',
+}
 const EFFECT_LABEL: Partial<Record<ModuleStats['kind'], string>> = {
   web: 'Webbed',
   scram: 'Scrambled',
@@ -320,7 +327,8 @@ function ownView(combat: Combat, index: number): OwnView {
     combat.stats[o].modules.forEach((m, i) => {
       const run = other.modules[i]
       if (!run.on || run.target !== index) return
-      const label = m.kind === 'ewar' ? m.name : EFFECT_LABEL[m.kind]
+      // Help from a friend is listed with what the enemy is doing, so the pilot can see it is arriving.
+      const label = m.assist ? ASSIST_LABEL[m.kind] : m.kind === 'ewar' ? m.name : EFFECT_LABEL[m.kind]
       if (label) effects.add(label)
     })
   })

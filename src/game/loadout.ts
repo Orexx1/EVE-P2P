@@ -21,6 +21,11 @@ const EFFECT_KIND: Record<number, ModuleKind> = {
   4: 'shieldBoost',
   4936: 'shieldBoost', // ancillary
   26: 'hullRep',
+  // Remote assistance: the same repair, given to a locked target.
+  6188: 'armorRep',
+  6186: 'shieldBoost',
+  6185: 'hullRep',
+  6184: 'capTransfer',
   48: 'capBooster',
   6426: 'web',
   5934: 'scram',
@@ -113,7 +118,7 @@ const A = {
 const DOUBLED_OVERLOADS = [A.overloadDamage, A.overloadRof, A.overloadSpeed, A.overloadArmor, A.overloadShield]
 const ownOverload = (type: SdeType) => type.attributes.some((a) => DOUBLED_OVERLOADS.includes(a.id as (typeof DOUBLED_OVERLOADS)[number]) && a.v !== 0)
 
-const TARGETED = new Set<ModuleKind>(['web', 'scram', 'disrupt', 'ewar', 'neut', 'nos', 'ecm'])
+const TARGETED = new Set<ModuleKind>(['web', 'scram', 'disrupt', 'ewar', 'neut', 'nos', 'ecm', 'capTransfer'])
 
 const SENSOR_INDEX: Record<string, number> = { gravimetric: 0, ladar: 1, magnetometric: 2, radar: 3 }
 
@@ -297,14 +302,15 @@ export function computeStats(own: Loadout, on: boolean[], projections: Projectio
           reload,
           autoReload: false,
           boost: charges > 0 ? attr(A.chargedArmorMultiplier, 3) : 1,
+          assist: timing.needsTarget,
         })
       }
       case 'hullRep':
-        return moduleStats({ ...base, ...timing, amount: attr(A.structureDamageAmount) })
+        return moduleStats({ ...base, ...timing, amount: attr(A.structureDamageAmount), assist: timing.needsTarget })
       case 'shieldBoost': {
         // An ancillary booster burns its charges instead of capacitor.
         const charges = effect.id === ANCILLARY_SHIELD_EFFECT ? loads() : 0
-        return moduleStats({ ...base, ...timing, amount: attr(A.shieldBonus), charges, reload, capNeed: charges > 0 ? 0 : timing.capNeed })
+        return moduleStats({ ...base, ...timing, amount: attr(A.shieldBonus), charges, reload, capNeed: charges > 0 ? 0 : timing.capNeed, assist: timing.needsTarget })
       }
       case 'capBooster': {
         const charges = loads()
@@ -330,6 +336,8 @@ export function computeStats(own: Loadout, on: boolean[], projections: Projectio
           damage: [attr(A.emDamage), attr(A.thermalDamage), attr(A.kineticDamage), attr(A.explosiveDamage)],
           flightTime: attr(A.damageDelay, 7500) / 1000,
         })
+      case 'capTransfer':
+        return moduleStats({ ...base, ...timing, amount: attr(A.powerTransferAmount), assist: true })
       case 'neut':
         return moduleStats({ ...base, ...timing, amount: attr(A.energyNeutralizerAmount) })
       case 'nos':

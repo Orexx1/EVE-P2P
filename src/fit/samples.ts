@@ -116,7 +116,7 @@ Heavy Energy Neutralizer II
 Heavy Energy Neutralizer II
 Heavy Energy Neutralizer II
 Heavy Energy Neutralizer II
-Stasis Webification Burst Projector
+Capital Energy Neutralizer II
 
 Capital Trimark Armor Pump II
 Capital Trimark Armor Pump II
