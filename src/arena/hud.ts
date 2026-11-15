@@ -39,8 +39,9 @@ const SLOT_ROWS: Array<[string, string]> = [
   ['LO', 'Low slots'],
 ]
 
-const rangeOptions = (selected: number) =>
-  RANGES.map((r) => `<option value="${r}"${r === selected ? ' selected' : ''}>${formatRange(r)}</option>`).join('')
+const RANGE_KEY = 'eve-p2p:ranges'
+/** A phone held sideways: too short for every window to be open at once. */
+const SHORT_SCREEN = '(max-height: 30rem)'
 
 // The ship's status dial. Shield, armor and hull are three arcs over the top,
 // outermost first; the capacitor is the disc of cells in the middle, which go
@@ -244,6 +245,10 @@ export class Hud {
   private stopKeys: (() => void) | null = null
   /** Windows the pilot has folded away, by name. Remembered from one fight to the next. */
   private folded = new Set<string>()
+  /** The distances the Orbit and Keep buttons use. Remembered from one fight to the next. */
+  private ranges = { orbit: 5_000, keep: 10_000 }
+  /** Which of the two distances the open menu is choosing, if it is open. */
+  private choosing: 'orbit' | 'keep' | null = null
   /** Where each bracket was last put, so a bracket that has not moved is left alone. */
   private placed: string[] = []
   /** The markup last written into an element, so the page is only touched when it changes. */
@@ -332,8 +337,12 @@ export class Hud {
             <button type="button" data-act="look" data-el="look" title="Centre the camera on this; again to return to your ship">${GLYPH.look}<span>Look at</span></button>
           </div>
           <div class="sel-ranges">
-            <label>Orbit <select data-el="orbitRange" aria-label="Orbit distance">${rangeOptions(5_000)}</select></label>
-            <label>Keep <select data-el="keepRange" aria-label="Keep at range distance">${rangeOptions(10_000)}</select></label>
+            <button type="button" data-range-menu="orbit" aria-haspopup="true" aria-expanded="false" title="Choose the distance to orbit at">Orbit at <b data-el="orbitRange"></b></button>
+            <button type="button" data-range-menu="keep" aria-haspopup="true" aria-expanded="false" title="Choose the range to keep at">Keep at <b data-el="keepRange"></b></button>
+          </div>
+          <div class="range-menu" data-el="rangeMenu" role="group" hidden>
+            <p data-el="rangeTitle"></p>
+            <div class="range-options">${RANGES.map((r) => `<button type="button" data-range="${r}">${formatRange(r)}</button>`).join('')}</div>
           </div>
         </section>
         <section class="panel overview" aria-label="Overview">
@@ -414,7 +423,17 @@ export class Hud {
     } catch {
       // No storage, or nothing sensible in it: every window starts open.
     }
+    // On a phone the open drone window is a drawer over the ship's status, so every fight starts with it put away.
+    if (window.matchMedia?.(SHORT_SCREEN).matches) this.folded.add('craft')
     this.applyFolds()
+    try {
+      const kept = JSON.parse(localStorage.getItem(RANGE_KEY) ?? '{}') as Partial<typeof this.ranges>
+      if (RANGES.includes(kept.orbit!)) this.ranges.orbit = kept.orbit!
+      if (RANGES.includes(kept.keep!)) this.ranges.keep = kept.keep!
+    } catch {
+      // The usual distances, then.
+    }
+    this.showRanges()
     // Overheat one module: hold it down, or Shift and click. Holding suits a thumb.
     let holding: ReturnType<typeof setTimeout> | undefined
     const release = () => clearTimeout(holding)
@@ -448,7 +467,15 @@ export class Hud {
       }
     }
     window.addEventListener('keydown', onKey)
-    this.stopKeys = () => window.removeEventListener('keydown', onKey)
+    // A tap anywhere else, space included, puts the distance menu away.
+    const away = (event: Event) => {
+      if (this.choosing && !(event.target as HTMLElement | null)?.closest?.('.range-menu, [data-range-menu]')) this.chooseRange(null)
+    }
+    window.addEventListener('pointerdown', away)
+    this.stopKeys = () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('pointerdown', away)
+    }
     this.root.classList.toggle('wide-rack', SLOT_ROWS.some(([slot]) => rack.filter((m) => m.slot === slot).length > 6))
     this.root.classList.toggle('has-craft', session.craftStats.length > 0)
     this.root.classList.toggle('has-squadrons', session.craftStats.some((c) => c.kind === 'fighter'))
@@ -457,6 +484,24 @@ export class Hud {
 
     this.root.addEventListener('click', (event) => {
       const target = event.target as HTMLElement
+      // The distance menu: open it for orbiting or keeping at range, then pick a distance.
+      const menu = target.closest<HTMLElement>('[data-range-menu]')?.dataset.rangeMenu as 'orbit' | 'keep' | undefined
+      if (menu) return this.chooseRange(this.choosing === menu ? null : menu)
+      const picked = target.closest<HTMLElement>('[data-range]')?.dataset.range
+      if (picked !== undefined && this.choosing) {
+        const kind = this.choosing
+        this.ranges[kind] = Number(picked)
+        try {
+          localStorage.setItem(RANGE_KEY, JSON.stringify(this.ranges))
+        } catch {
+          // Not remembered, then.
+        }
+        this.showRanges()
+        this.chooseRange(null)
+        // Choosing a distance is the order, as it is from the menu in the game.
+        handlers.order({ kind, target: this.selected, range: this.ranges[kind] })
+        return
+      }
       const fold = target.closest<HTMLElement>('[data-fold]')?.dataset.fold
       if (fold !== undefined) {
         if (!this.folded.delete(fold)) this.folded.add(fold)
@@ -532,11 +577,10 @@ export class Hud {
         return
       }
       const act = target.closest<HTMLElement>('[data-act]')?.dataset.act
-      const range = (key: string) => Number((this.el[key] as HTMLSelectElement).value)
       const on = this.selected
       if (act === 'approach') handlers.order({ kind: 'approach', target: on })
-      if (act === 'orbit') handlers.order({ kind: 'orbit', target: on, range: range('orbitRange') })
-      if (act === 'keep') handlers.order({ kind: 'keep', target: on, range: range('keepRange') })
+      if (act === 'orbit') handlers.order({ kind: 'orbit', target: on, range: this.ranges.orbit })
+      if (act === 'keep') handlers.order({ kind: 'keep', target: on, range: this.ranges.keep })
       if (act === 'stop') handlers.order({ kind: 'stop' })
       if (act === 'lock') handlers.command({ c: lockState(session.own, on) === LOCK_NONE ? 'lock' : 'unlock', t: on })
       if (act === 'look') this.focus = this.focus === on ? session.me : on
@@ -549,14 +593,22 @@ export class Hud {
         if (!panel.hidden && !this.stopGraphics) this.stopGraphics = mountGraphicsPanel(panel)
       }
     })
-    // Changing a distance while already orbiting or holding range applies it straight away.
-    this.root.addEventListener('change', (event) => {
-      const el = (event.target as HTMLElement).dataset.el
-      const order = session.world.ships[session.me].order
-      const value = Number((event.target as HTMLSelectElement).value)
-      if (el === 'orbitRange' && order.kind === 'orbit') handlers.order({ kind: 'orbit', target: order.target, range: value })
-      if (el === 'keepRange' && order.kind === 'keep') handlers.order({ kind: 'keep', target: order.target, range: value })
-    })
+  }
+
+  /** Writes the two chosen distances onto their buttons. */
+  private showRanges() {
+    this.el.orbitRange.textContent = formatRange(this.ranges.orbit)
+    this.el.keepRange.textContent = formatRange(this.ranges.keep)
+  }
+
+  /** Opens the distance menu for orbiting or keeping at range, or puts it away. */
+  private chooseRange(kind: 'orbit' | 'keep' | null) {
+    this.choosing = kind
+    this.el.rangeMenu.hidden = !kind
+    this.root.querySelectorAll<HTMLElement>('[data-range-menu]').forEach((button) => button.setAttribute('aria-expanded', String(button.dataset.rangeMenu === kind)))
+    if (!kind) return
+    this.el.rangeTitle.textContent = kind === 'orbit' ? 'Orbit at' : 'Keep at range'
+    this.root.querySelectorAll<HTMLElement>('[data-range]').forEach((button) => button.setAttribute('aria-pressed', String(Number(button.dataset.range) === this.ranges[kind])))
   }
 
   /** Tells the start-up screen how loading is going. */
@@ -866,6 +918,8 @@ export class Hud {
     const out = drones.filter((n) => views[n].state !== 'bay' && views[n].state !== 'dead')
     const use: string[] = []
     if (drones.length) use.push(`${out.length} of ${s.droneLimits.max} out, ${int(out.reduce((sum, n) => sum + s.craftStats[n].bandwidth, 0))}/${int(s.droneLimits.bandwidth)} Mbit/s`)
+    const squadrons = views.map((_, n) => n).filter((n) => s.craftStats[n].kind === 'fighter' && views[n].state !== 'dead')
+    if (squadrons.length) use.push(`${squadrons.filter((n) => views[n].state !== 'bay').length} of ${squadrons.length} squadrons out`)
     if (this.picked.size) use.push(`${this.picked.size} picked`)
     this.el.craftUse.textContent = use.join('. ')
     this.el.stance?.setAttribute('aria-pressed', String(s.own.aggressive))

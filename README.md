@@ -108,6 +108,14 @@ The screen is laid out the way the game's is, so a pilot knows where to look.
   bring it back. Folded, the selected item still shows its name and range, the
   overview how many things it lists, and the drone window how many drones are
   out. What is folded is remembered for the next fight.
+- **Distances.** "Orbit at" and "Keep at" under the selected item each open a
+  menu of distances. Picking one gives the order at that distance, and the Orbit
+  and Keep buttons use it from then on.
+- **On a phone** there is not the height for the drone window above the ship's
+  status. Put away, it is its title strip and its orders, which act on
+  everything when nothing is picked. Tap the strip and it opens as a drawer down
+  the left edge with a list that scrolls under a thumb; tap it again to put it
+  away. Every fight starts with it put away.
 - **Overheating.** Hold a module for half a second to overheat it (Shift+click
   with a mouse); it glows orange and takes effect from its next cycle. The
   button at the end of each rack overheats the whole rack and fills as the rack

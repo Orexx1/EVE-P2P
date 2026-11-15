@@ -108,8 +108,8 @@ try {
   note(`fight view settled ${((Date.now() - opened) / 1000).toFixed(1)} s after the fight opened`)
   await page.waitForFunction(() => document.querySelector('[data-el="clock"]')?.textContent, { timeout: 60_000 })
   // Get moving and lock up, so the pictures show a fight and not just a ship.
-  await page.select('.arena [data-el="orbitRange"]', '1000')
-  await page.click('.arena [data-act="orbit"]')
+  await page.click('.arena [data-range-menu="orbit"]')
+  await page.click('.arena [data-range="1000"]')
   await page.click('.arena [data-el="lock"]')
   await sleep(4000)
   // A capital ship takes longer than that to lock.
