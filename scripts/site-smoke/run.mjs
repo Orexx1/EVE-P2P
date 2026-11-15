@@ -130,6 +130,9 @@ try {
   if (hasCraft) {
     await page.click('.arena [data-craft="engage"]')
     await sleep(500)
+    // At this size the drone window starts put away; open it to reach each squadron's abilities.
+    if (await page.$('.arena .craft[data-folded]')) await page.click('.arena [data-fold="craft"]')
+    await sleep(300)
     for (const button of await page.$$('.arena .ability.salvo, .arena .ability.speed')) await button.click()
     note(`drone window after Engage: ${JSON.stringify(await craftWindow())}`)
   }
