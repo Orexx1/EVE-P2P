@@ -35,7 +35,7 @@ import { createWorld, parseOrder, step, type Order, type ShipSpec, type World } 
 import { runBot } from './bots'
 import { buildLoadout, computeStats, projects, type Loadout, type Projection } from './loadout'
 
-const PROTOCOL = 7
+const PROTOCOL = 8
 const STEP_SECONDS = 0.1
 const MAX_EFT_LENGTH = 20_000
 const MAX_PILOT_LENGTH = 32
