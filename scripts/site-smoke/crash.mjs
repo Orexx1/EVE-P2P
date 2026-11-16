@@ -94,7 +94,7 @@ try {
   await fourth.click('[data-act="solo"]')
   await fourth.waitForFunction(() => window.__arena?.models === 'loading', { timeout: 30_000 })
   await sleep(1500)
-  await fourth.goto('http://localhost:4173/vendor/ccpwgl2/LICENSE')
+  await fourth.goto('about:blank')
   await fourth.close()
   const fifth = await arrive()
   const clean = await look(fifth)
