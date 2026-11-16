@@ -107,6 +107,16 @@ try {
   await page.click(scenario ? `[data-scenario="${scenario}"] [data-act="scenario-solo"]` : '[data-act="solo"]')
   await page.waitForSelector('.arena .hud', { timeout: 30_000 })
   const opened = Date.now()
+  // BLANK: from the moment the engine is up it draws nothing (BLANK=1) or throws on every frame (BLANK=throw).
+  if (process.env.BLANK) {
+    await page.waitForFunction(() => typeof window.tny?.Render === 'function', { timeout: 120_000 })
+    await page.evaluate((how) => {
+      window.tny.Render = () => {
+        if (how === 'throw') throw new TypeError('made to fail by the check')
+      }
+    }, process.env.BLANK)
+    note(`the engine was made to ${process.env.BLANK === 'throw' ? 'throw on every frame' : 'draw nothing'}`)
+  }
   await shoot('loading')
 
   // The fight holds on a loading notice until the real hulls are in.
@@ -172,13 +182,13 @@ try {
   // BLANK=1 makes the engine draw nothing from the moment the models are in, as a device
   // that loads them and cannot show them does. The fight must go back to simple ships,
   // and the next visit must start the engine in compatibility mode and draw with it.
-  if (state === 'ready' && process.env.BLANK) {
-    await page.evaluate(() => (window.tny.Render = () => {}))
-    await page.waitForFunction(() => window.__arena?.models === 'broken', { timeout: 40_000 }).catch(() => {})
+  if (process.env.BLANK && (state === 'ready' || state === 'broken')) {
+    await page.waitForFunction(() => window.__arena?.models === 'broken', { timeout: 60_000 }).catch(() => {})
     const after = await page.evaluate(() => ({
       models: window.__arena?.models,
       why: window.__arena?.why,
       drawing: window.__arena?.drawing,
+      renderError: window.__arena?.renderError,
       standin: document.querySelector('canvas.standin')?.hidden === false,
       options: JSON.parse(localStorage.getItem('eve-p2p:graphics') ?? 'null'),
     }))
