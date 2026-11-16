@@ -166,9 +166,38 @@ try {
     await sleep(8000)
     note(`drone window after Recall: ${JSON.stringify(await craftWindow())}`)
   }
-  note(`picture check: ${JSON.stringify(await page.evaluate(() => ({ lit: window.__arena?.lit, models: window.__arena?.models, why: window.__arena?.why })))}`)
+  note(`picture check: ${JSON.stringify(await page.evaluate(() => ({ lit: window.__arena?.lit, drawing: window.__arena?.drawing, denied: window.__arena?.denied, models: window.__arena?.models, why: window.__arena?.why })))}`)
   note(`overview: ${await page.evaluate(() => [...document.querySelectorAll('.overview tbody tr')].map((e) => e.className.split(' ')[0] + ' ' + e.textContent.trim().replace(/\s+/g, ' ')).join(' | '))}`)
   note(`hud: ${await page.evaluate(() => [document.querySelector('[data-el="layers"]')?.textContent, document.querySelector('[data-el="selRange"]')?.textContent, ...[...document.querySelectorAll('.combat-log li')].map((l) => l.textContent)].join(' | '))}`)
+  // BLANK=1 makes the engine draw nothing from the moment the models are in, as a device
+  // that loads them and cannot show them does. The fight must go back to simple ships,
+  // and the next visit must start the engine in compatibility mode and draw with it.
+  if (state === 'ready' && process.env.BLANK) {
+    await page.evaluate(() => (window.tny.Render = () => {}))
+    await page.waitForFunction(() => window.__arena?.models === 'broken', { timeout: 40_000 }).catch(() => {})
+    const after = await page.evaluate(() => ({
+      models: window.__arena?.models,
+      why: window.__arena?.why,
+      drawing: window.__arena?.drawing,
+      standin: document.querySelector('canvas.standin')?.hidden === false,
+      options: JSON.parse(localStorage.getItem('eve-p2p:graphics') ?? 'null'),
+    }))
+    note(`after the engine drew nothing: ${JSON.stringify(after)}`)
+    await shoot('blank')
+    let outcome = after.models === 'broken' && after.standin && after.options?.compat === true ? '' : 'a blank picture was not noticed'
+    // The next visit: compatibility mode.
+    await page.reload()
+    await page.waitForFunction(() => !document.querySelector('#load')?.disabled, { timeout: 60_000 })
+    await page.click(`[data-sample="${process.env.FIT || 0}"]`)
+    await page.click('[data-scenario="range"] [data-act="scenario-solo"]')
+    await page.waitForFunction(() => ['ready', 'failed', 'broken'].includes(window.__arena?.models), { timeout: 200_000 })
+    await sleep(12_000)
+    const careful = await page.evaluate(() => ({ models: window.__arena?.models, denied: window.__arena?.denied, lit: window.__arena?.lit, drawing: window.__arena?.drawing, timings: window.__arena?.timings }))
+    note(`the next visit, in compatibility mode: ${JSON.stringify(careful)}`)
+    await shoot('compatibility')
+    if (careful.models !== 'ready' || !careful.denied) outcome ||= 'the engine did not come up and draw in compatibility mode'
+    state = outcome || 'done'
+  }
   // LOSE=1 takes the graphics context away mid-fight, as a phone short of memory does:
   // the fight must carry on with simple ships and say why.
   if (state === 'ready' && process.env.LOSE) {

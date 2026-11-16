@@ -5,6 +5,7 @@ import './styles.css'
 import './theme.css'
 import type { FittingDataset } from 'eve-fit-engine'
 import { cleared, hold, startGuard } from './ui/crashGuard'
+import { watchProblems } from './ui/problems'
 import { loadDataset } from './data/dataset'
 import { FitError, loadFit } from './fit/loadFit'
 import { SAMPLE_FITS } from './fit/samples'
@@ -16,7 +17,8 @@ import { crashNotice } from './ui/graphics'
 
 const STORAGE_KEY = 'eve-p2p:last-fit'
 
-// Before anything else: did the last visit die, and in the middle of what?
+// Before anything else: keep what goes wrong, and find out whether the last visit died and in the middle of what.
+watchProblems()
 const crashed = startGuard()
 const starting = hold('boot')
 

@@ -32,6 +32,9 @@ on:
       scenario:
         description: Scenario to fly in the fight check instead, by id (brawl, hotdrop, range, ...)
         required: false
+      blank:
+        description: Set to 1 to make the engine draw nothing in the fight check, as a device that loads the models and cannot show them does
+        required: false
       lose:
         description: Set to 1 to take the graphics context away mid-fight in the fight check, as a phone short of memory does
         required: false
@@ -112,6 +115,7 @@ jobs:
           SCENARIO: ${{ inputs.scenario }}
           HIDE_EXT: ${{ inputs.hide }}
           LOSE: ${{ inputs.lose }}
+          BLANK: ${{ inputs.blank }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:

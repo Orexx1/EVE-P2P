@@ -110,6 +110,15 @@ The screen is laid out the way the game's is, so a pilot knows where to look.
   is put back on simple ships instead of being left with an empty screen. A
   phone starts with half-size textures, and quarter-size if it cannot read the
   game's compressed textures.
+- **A device that loads the models and draws nothing.** For the first seconds
+  of a fight the picture is read back once a second, two ways. Black every time,
+  the engine throwing on every frame, or no frame drawn in ten seconds, puts the
+  fight back on simple ships and sets the engine to compatibility mode for the
+  next load: it is started without the optional graphics features the automated
+  checks run without, and without anti-aliasing. If that does not help either,
+  the models go off. The report under Graphics says how many frames were asked
+  for, tried and drawn, what the picture read as, the first error the engine
+  threw, the device's shader limits, and anything written to the console.
 - **When the browser kills the page.** A phone's browser kills a page that asks
   for more memory than it will give, and after two kills in a row shows "A
   problem repeatedly occurred" instead of the site. The page cannot catch

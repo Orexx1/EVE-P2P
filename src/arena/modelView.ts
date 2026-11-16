@@ -12,7 +12,7 @@
 import { RESOURCE_RELAY } from '../config'
 import { dnaFor } from '../data/models'
 import { cleared, hold } from '../ui/crashGuard'
-import { getGraphics, markEngineStarted, onGraphicsChange, pixelRatio } from '../ui/graphics'
+import { getGraphics, markEngineStarted, onGraphicsChange, pixelRatio, setGraphics } from '../ui/graphics'
 import { FIELD_OF_VIEW, type CameraRig, type FightView, type ShipView } from './rig'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -22,6 +22,11 @@ declare const tw2: any
 const LIBRARY = 'vendor/ccpwgl2/ccpwgl2_int.min.js'
 const BACKDROP = 'res:/dx9/scene/universe/a01_cube.black'
 const FAR_PLANE = 2_000_000
+
+// Graphics features the engine uses when a device offers them and does without
+// when it does not. The automated checks run without several of them, so that
+// is the path known to work; compatibility mode puts a device on it.
+const OPTIONAL = ['parallel_shader_compile', 'clip_control', 'depth_clamp', 'float_blend']
 
 // The game's data gains fields over time, and the prebuilt library must know
 // each one to read a file at all. These are declared at run time.
@@ -40,6 +45,8 @@ let broken: string | null = null
 
 /** What happened, for the graphics report and the automated checks. */
 const report = ((window as unknown as { __arena?: Record<string, unknown> }).__arena ??= {})
+/** How often the engine has asked for a frame, how many were tried, and how many were drawn without it throwing. */
+const counts = { ticks: 0, frames: 0, drawn: 0, threw: 0 }
 /** How long each step took. */
 const timings: Record<string, number> = (report.timings ??= {}) as Record<string, number>
 const timed = async <T>(name: string, work: Promise<T>): Promise<T> => {
@@ -177,6 +184,24 @@ async function boot(): Promise<Stage> {
   holder.append(canvas)
   document.body.append(holder)
 
+  if (graphics.compat) {
+    // The engine asks the context what it can do; in compatibility mode the answer leaves the optional features out.
+    const denied = (name: unknown) => OPTIONAL.some((part) => String(name).toLowerCase().includes(part))
+    const getContext = canvas.getContext.bind(canvas) as (type: string, options?: unknown) => RenderingContext | null
+    ;(canvas as unknown as { getContext: typeof getContext }).getContext = (type, options) => {
+      const gl = getContext(type, options) as (WebGL2RenderingContext & { eased?: boolean }) | null
+      if (gl && !gl.eased && typeof gl.getExtension === 'function') {
+        gl.eased = true
+        const get = gl.getExtension.bind(gl)
+        const list = gl.getSupportedExtensions.bind(gl)
+        gl.getExtension = ((name: string) => (denied(name) ? null : get(name))) as typeof gl.getExtension
+        gl.getSupportedExtensions = () => (list() ?? []).filter((name) => !denied(name))
+      }
+      return gl
+    }
+    report.denied = `${OPTIONAL.join(', ')}, anti-aliasing`
+  }
+
   const made: Stage = { canvas, holder, scene: null, active: null }
   // The camera the engine asks for its matrices each frame: the active fight's rig.
   const camera = {
@@ -209,10 +234,13 @@ async function boot(): Promise<Stage> {
         // These three are fixed for the life of the engine: see ui/graphics.ts.
         shaderQuality: graphics.shaders,
         textureQuality: graphics.textures,
-        antialiasing: graphics.antialias,
+        antialiasing: graphics.antialias && !graphics.compat,
       },
       // Nothing is drawn between fights.
-      render: (dt: number) => made.active?.frame(dt),
+      render: (dt: number) => {
+        counts.ticks++
+        made.active?.frame(dt)
+      },
     }),
   )
   markEngineStarted(graphics)
@@ -255,6 +283,13 @@ export class ModelView implements FightView {
   private looks = 0
   private blanks = 0
   private lookAt = 2
+  private probe: CanvasRenderingContext2D | null = null
+  /** Frames in a row the engine has thrown on. */
+  private failing = 0
+  /** Seconds on screen and in view, by the clock and not by frames drawn. */
+  private watched = 0
+  private watch: ReturnType<typeof setInterval> | undefined
+  private gaveUp = false
   /** Lets go of the mark that says the models are on screen. */
   private release: (() => void) | null = null
   private slowFor = 0
@@ -302,6 +337,45 @@ export class ModelView implements FightView {
     root.prepend(s.canvas)
     s.active = this
     this.release = hold('models')
+    // A device on which the engine never gets as far as drawing does not reach the checks made after a frame.
+    const drawnBefore = counts.drawn
+    this.watch = setInterval(() => {
+      if (document.visibilityState !== 'visible') return
+      this.describe()
+      if (++this.watched === 10 && counts.drawn === drawnBefore) this.giveUp('The model engine loaded but did not draw a single frame on this device.')
+    }, 1_000)
+  }
+
+  /** Puts what is known about the drawing into the report. */
+  private describe(lit = '') {
+    try {
+      const gl = tw2.device.gl as WebGL2RenderingContext
+      const c = this.stage.canvas
+      const error = gl.getError()
+      if (error && !report.glError) report.glError = `0x${error.toString(16)}`
+      report.drawing =
+        `asked ${counts.ticks} times, tried ${counts.frames}, drew ${counts.drawn}, threw ${counts.threw}` +
+        `${lit || (report.lit !== undefined ? `; picture ${String(report.lit)}` : '; picture not checked yet')}` +
+        `; buffer ${gl.drawingBufferWidth}x${gl.drawingBufferHeight}, canvas ${c.clientWidth}x${c.clientHeight}` +
+        `${report.glError ? `; GL error ${String(report.glError)}` : ''}${gl.isContextLost() ? '; context lost' : ''}`
+    } catch (err) {
+      report.drawing = `could not be read: ${String(err instanceof Error ? err.message : err)}`
+    }
+  }
+
+  /**
+   * This device has the models and cannot show them. The fight goes back to simple
+   * ships, and the engine is started the careful way next time; if it already was,
+   * the models are turned off.
+   */
+  private giveUp(why: string) {
+    if (this.gaveUp) return
+    this.gaveUp = true
+    this.describe()
+    const careful = getGraphics().compat
+    setGraphics(careful ? { models: false } : { compat: true })
+    broken = `${why} ${careful ? 'Compatibility mode did not help, so the real models are now off.' : 'Reload the page to try the engine in compatibility mode.'}`
+    this.onBroken?.(broken)
   }
 
   render(ships: ShipView[]) {
@@ -328,7 +402,18 @@ export class ModelView implements FightView {
       hull.display = ship.alive
       hull.boosterStrength = ship.thrust
     })
-    tny.Render(dt)
+    counts.frames++
+    try {
+      tny.Render(dt)
+      counts.drawn++
+      this.failing = 0
+    } catch (err) {
+      counts.threw++
+      // The first one is the one worth reading.
+      report.renderError ??= `${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}${err instanceof Error && err.stack ? ` | ${err.stack.split('\n').slice(0, 3).join(' < ').slice(0, 300)}` : ''}`
+      if (++this.failing === 30) this.giveUp('The model engine failed every time it tried to draw on this device.')
+      return
+    }
     this.shown += dt
     this.look()
     // Half a minute of real models on screen: whatever stopped the page before is not stopping it now.
@@ -355,31 +440,52 @@ export class ModelView implements FightView {
   private look() {
     if (this.looks >= 8 || this.shown < this.lookAt) return
     this.lookAt = this.shown + 1
+    // Two ways of reading the picture, because each can be unavailable: straight from the
+    // graphics context if the engine has left the finished frame there, and by copying the
+    // canvas down to a few pixels. Black by every reading that could be made is black.
+    let direct = -1
+    let copied = -1
     try {
       const gl = tw2.device.gl as WebGL2RenderingContext
-      // Only the finished frame is read, and only if the engine has left it in place to be read.
-      if (gl.getParameter(gl.FRAMEBUFFER_BINDING) !== null) return
-      const w = gl.drawingBufferWidth
-      const h = gl.drawingBufferHeight
-      const pixel = new Uint8Array(4)
-      let lit = 0
-      for (let y = 1; y <= 5; y++) {
-        for (let x = 1; x <= 7; x++) {
-          gl.readPixels(Math.floor((w * x) / 8), Math.floor((h * y) / 6), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel)
-          if (pixel[0] + pixel[1] + pixel[2] > 0) lit++
+      if (gl.getParameter(gl.FRAMEBUFFER_BINDING) === null) {
+        const w = gl.drawingBufferWidth
+        const h = gl.drawingBufferHeight
+        const pixel = new Uint8Array(4)
+        direct = 0
+        for (let y = 1; y <= 5; y++) {
+          for (let x = 1; x <= 7; x++) {
+            gl.readPixels(Math.floor((w * x) / 8), Math.floor((h * y) / 6), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel)
+            if (pixel[0] + pixel[1] + pixel[2] > 0) direct++
+          }
         }
       }
-      this.looks++
-      if (lit === 0) this.blanks++
-      report.lit = lit
-      if (this.looks === 8 && this.blanks === 8) {
-        broken = 'This device loaded the ship models but drew nothing with them.'
-        this.onBroken?.(broken)
+    } catch {
+      direct = -1
+    }
+    try {
+      this.probe ??= Object.assign(document.createElement('canvas'), { width: 14, height: 10 }).getContext('2d', { willReadFrequently: true })
+      const ctx = this.probe
+      if (ctx) {
+        ctx.clearRect(0, 0, 14, 10)
+        ctx.drawImage(this.stage.canvas, 0, 0, 14, 10)
+        const data = ctx.getImageData(0, 0, 14, 10).data
+        copied = 0
+        for (let i = 0; i < data.length; i += 4) if (data[i] + data[i + 1] + data[i + 2] > 0) copied++
       }
     } catch {
-      // A device that will not let the picture be read is left alone.
-      this.looks = 8
+      copied = -1
     }
+    // A device that will not let the picture be read either way is left alone.
+    if (direct < 0 && copied < 0) {
+      this.looks = 8
+      report.lit = 'could not be read'
+      return
+    }
+    this.looks++
+    if (Math.max(direct, copied) <= 0) this.blanks++
+    report.lit = `${direct < 0 ? 'not readable' : `${direct} of 35`} direct, ${copied < 0 ? 'not readable' : `${copied} of 140`} copied, black ${this.blanks} times in ${this.looks}`
+    this.describe()
+    if (this.looks === 8 && this.blanks === 8) this.giveUp('This device loaded the ship models but drew nothing with them.')
   }
 
   resize() {
@@ -388,6 +494,7 @@ export class ModelView implements FightView {
 
   dispose() {
     const s = this.stage
+    clearInterval(this.watch)
     this.release?.()
     this.release = null
     if (s.active !== this) return

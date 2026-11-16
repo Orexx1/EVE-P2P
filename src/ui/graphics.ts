@@ -6,6 +6,7 @@
 // starts, which happens once per visit, so those apply after a reload.
 
 import { crashCount, lastCrash, startGuard } from './crashGuard'
+import { problems } from './problems'
 
 export interface Graphics {
   /** Real EVE hulls, or the simple stand-in shapes. */
@@ -20,19 +21,27 @@ export interface Graphics {
   fps: 0 | 30 | 60
   /** Go back to simple shapes if real models cannot hold a usable frame rate. */
   autoSimplify: boolean
+  /**
+   * Start the model engine the careful way: without the optional graphics features
+   * it is not tested without, and without anti-aliasing. Turned on by itself for a
+   * device that loaded the models and then drew nothing.
+   */
+  compat: boolean
 }
 
 export const PRESETS: Record<string, Graphics> = {
-  Low: { models: true, resolution: 0.75, antialias: false, textures: 2, shaders: 'hi', fps: 30, autoSimplify: true },
-  Medium: { models: true, resolution: 1, antialias: false, textures: 1, shaders: 'hi', fps: 0, autoSimplify: true },
-  High: { models: true, resolution: 1.5, antialias: true, textures: 0, shaders: 'hi', fps: 0, autoSimplify: true },
-  Ultra: { models: true, resolution: 0, antialias: true, textures: 0, shaders: 'depth', fps: 0, autoSimplify: false },
+  Low: { models: true, resolution: 0.75, antialias: false, textures: 2, shaders: 'hi', fps: 30, autoSimplify: true, compat: false },
+  Medium: { models: true, resolution: 1, antialias: false, textures: 1, shaders: 'hi', fps: 0, autoSimplify: true, compat: false },
+  High: { models: true, resolution: 1.5, antialias: true, textures: 0, shaders: 'hi', fps: 0, autoSimplify: true, compat: false },
+  Ultra: { models: true, resolution: 0, antialias: true, textures: 0, shaders: 'depth', fps: 0, autoSimplify: false, compat: false },
 }
 /** What this device's graphics can do, read once from a throwaway context. */
 export interface Device {
   webgl: 0 | 1 | 2
   renderer: string
   maxTexture: number
+  /** The limits a shader has to fit inside, by name. */
+  limits: Record<string, number>
   /** Extension name to whether it is there, for the ones the model engine cares about. */
   extensions: Record<string, boolean>
   /** A phone or tablet: touch is the main way in. */
@@ -57,12 +66,13 @@ const EXTENSIONS = [
   'KHR_parallel_shader_compile',
 ]
 
-const DEVICE_KEY = 'eve-p2p:device'
+const DEVICE_KEY = 'eve-p2p:device2'
+const LIMITS = ['MAX_TEXTURE_IMAGE_UNITS', 'MAX_COMBINED_TEXTURE_IMAGE_UNITS', 'MAX_VERTEX_TEXTURE_IMAGE_UNITS', 'MAX_VERTEX_UNIFORM_VECTORS', 'MAX_FRAGMENT_UNIFORM_VECTORS', 'MAX_VARYING_VECTORS', 'MAX_VERTEX_ATTRIBS', 'MAX_DRAW_BUFFERS', 'MAX_SAMPLES', 'MAX_RENDERBUFFER_SIZE'] as const
 let device: Device | null = null
 export function getDevice(): Device {
   if (device) return device
   const touch = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
-  const found: Device = { webgl: 0, renderer: '', maxTexture: 0, extensions: {}, touch }
+  const found: Device = { webgl: 0, renderer: '', maxTexture: 0, limits: {}, extensions: {}, touch }
   // Looked at once per browser version and remembered: a graphics context is not opened on every visit just to ask.
   try {
     const kept = JSON.parse(localStorage.getItem(DEVICE_KEY) ?? 'null') as { ua: string; device: Device } | null
@@ -81,6 +91,12 @@ export function getDevice(): Device {
       const info = gl.getExtension('WEBGL_debug_renderer_info')
       found.renderer = String((info && gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) || gl.getParameter(gl.RENDERER) || '')
       for (const name of EXTENSIONS) found.extensions[name] = !!gl.getExtension(name)
+      for (const name of LIMITS) {
+        const key = (gl as unknown as Record<string, number>)[name]
+        if (key !== undefined) found.limits[name.replace('MAX_', '').toLowerCase()] = Number(gl.getParameter(key)) || 0
+      }
+      const precision = gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT)
+      if (precision) found.limits.fragment_float_bits = precision.precision
       // The context was only for looking; give it back at once. Phones allow few.
       gl.getExtension('WEBGL_lose_context')?.loseContext()
       try {
@@ -123,6 +139,7 @@ function clean(raw: Partial<Graphics> | null): Graphics {
     shaders: g.shaders === 'lo' || g.shaders === 'depth' ? g.shaders : 'hi',
     fps: g.fps === 30 || g.fps === 60 ? g.fps : 0,
     autoSimplify: g.autoSimplify !== false,
+    compat: g.compat === true,
   }
 }
 
@@ -188,15 +205,15 @@ export function pixelRatio(g = getGraphics()): number {
 }
 
 /** The options the model engine was started with, once it has started. */
-let engineStarted: Pick<Graphics, 'antialias' | 'textures' | 'shaders'> | null = null
+let engineStarted: Pick<Graphics, 'antialias' | 'textures' | 'shaders' | 'compat'> | null = null
 export function markEngineStarted(g: Graphics) {
-  engineStarted = { antialias: g.antialias, textures: g.textures, shaders: g.shaders }
+  engineStarted = { antialias: g.antialias, textures: g.textures, shaders: g.shaders, compat: g.compat }
   listeners.forEach((listener) => listener(getGraphics()))
 }
 
 /** True when a chosen option will only take effect after the page is reloaded. */
 export function needsReload(g = getGraphics()): boolean {
-  return !!engineStarted && (engineStarted.antialias !== g.antialias || engineStarted.textures !== g.textures || engineStarted.shaders !== g.shaders)
+  return !!engineStarted && (engineStarted.antialias !== g.antialias || engineStarted.textures !== g.textures || engineStarted.shaders !== g.shaders || engineStarted.compat !== g.compat)
 }
 
 /**
@@ -214,14 +231,18 @@ export function graphicsReport(): string {
     arena.error ? `Error: ${String(arena.error)}` : '',
     lastCrash() ? `Last visit: the page was stopped by the browser while ${lastCrash()!.during === 'models' ? 'loading or drawing ship models' : 'starting'}` : '',
     crashCount().boot || crashCount().models ? `Stops on record: ${crashCount().models} with ship models, ${crashCount().boot} at start` : '',
-    arena.lit !== undefined ? `Picture check: ${String(arena.lit)} of 35 points lit` : '',
+    arena.drawing ? `Drawing: ${String(arena.drawing)}` : '',
+    arena.renderError ? `Engine error while drawing: ${String(arena.renderError)}` : '',
+    arena.denied ? `Engine started without: ${String(arena.denied)}` : '',
     arena.timings && Object.keys(arena.timings as object).length ? `Timings (ms): ${JSON.stringify(arena.timings)}` : '',
     `Options: ${JSON.stringify(g)}`,
     `Screen: ${window.innerWidth}x${window.innerHeight} at ${window.devicePixelRatio || 1}x, ${d.touch ? 'touch' : 'mouse'}`,
     `WebGL: ${d.webgl || 'none'}, ${d.renderer || 'renderer not given'}, textures up to ${d.maxTexture}`,
+    Object.keys(d.limits ?? {}).length ? `Limits: ${Object.entries(d.limits).map(([name, value]) => `${name} ${value}`).join(', ')}` : '',
     `Has: ${yes.join(', ') || 'none'}`,
     `Lacks: ${no.join(', ') || 'none'}`,
     `Browser: ${navigator.userAgent}`,
+    ...problems().map((line) => `Problem: ${line}`),
   ]
   return lines.filter(Boolean).join('\n')
 }
@@ -277,11 +298,14 @@ export function mountGraphicsPanel(host: HTMLElement): () => void {
             ${option('depth', 'High', g.shaders === 'depth')}${option('hi', 'Standard', g.shaders === 'hi')}
           </select>
         </label>
+        <label>Engine
+          <select data-gfx="compat">${option(0, 'Standard', !g.compat)}${option(1, 'Compatibility', g.compat)}</select>
+        </label>
         <label class="gfx-check">
           <input type="checkbox" data-gfx="autoSimplify"${g.autoSimplify ? ' checked' : ''} />
           Switch to simple shapes if the fight stutters
         </label>
-        ${needsReload(g) ? '<p class="gfx-note">Anti-aliasing, texture and shader changes apply after a reload. <button type="button" class="link" data-gfx="reload">Reload now</button></p>' : ''}
+        ${needsReload(g) ? '<p class="gfx-note">Anti-aliasing, texture, shader and engine changes apply after a reload. <button type="button" class="link" data-gfx="reload">Reload now</button></p>' : ''}
         <details class="gfx-report">
           <summary>Graphics report</summary>
           <p class="gfx-note">If the real ships or the backdrop are missing, copy this and send it on: it says what this device can and cannot draw.</p>
@@ -298,7 +322,7 @@ export function mountGraphicsPanel(host: HTMLElement): () => void {
     if (key === 'preset') return void (PRESETS[el.value] && setGraphics(PRESETS[el.value]))
     if (key === 'autoSimplify') return setGraphics({ autoSimplify: (el as HTMLInputElement).checked })
     if (key === 'shaders') return setGraphics({ shaders: el.value as Graphics['shaders'] })
-    if (key === 'models' || key === 'antialias') return setGraphics({ [key]: el.value === '1' })
+    if (key === 'models' || key === 'antialias' || key === 'compat') return setGraphics({ [key]: el.value === '1' })
     setGraphics({ [key]: Number(el.value) } as Partial<Graphics>)
   }
   const click = (event: Event) => {
