@@ -30,6 +30,9 @@ on:
       scenario:
         description: Scenario to fly in the fight check instead, by id (brawl, hotdrop, range, ...)
         required: false
+      hide:
+        description: WebGL extensions the browser should deny in the fight check, like "s3tc,rgtc,bptc" (a phone without desktop texture compression)
+        required: false
 
 jobs:
   smoke:
@@ -102,6 +105,7 @@ jobs:
           GFX: ${{ inputs.gfx }}
           EXTRAS: ${{ inputs.extras || 'merlin:0,caracal:1' }}
           SCENARIO: ${{ inputs.scenario }}
+          HIDE_EXT: ${{ inputs.hide }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:

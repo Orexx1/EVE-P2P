@@ -37,6 +37,25 @@ if (process.env.GFX) {
   await page.evaluateOnNewDocument((options) => localStorage.setItem('eve-p2p:graphics', options), process.env.GFX)
   note(`graphics options: ${process.env.GFX}`)
 }
+// HIDE_EXT="s3tc,rgtc,bptc" makes the browser deny those WebGL extensions, as a phone
+// whose graphics chip cannot read desktop texture compression does.
+if (process.env.HIDE_EXT) {
+  await page.evaluateOnNewDocument((hidden) => {
+    const denied = (name) => hidden.some((part) => String(name).toLowerCase().includes(part))
+    for (const ctx of [window.WebGL2RenderingContext, window.WebGLRenderingContext]) {
+      if (!ctx) continue
+      const get = ctx.prototype.getExtension
+      const list = ctx.prototype.getSupportedExtensions
+      ctx.prototype.getExtension = function (name) {
+        return denied(name) ? null : get.call(this, name)
+      }
+      ctx.prototype.getSupportedExtensions = function () {
+        return (list.call(this) ?? []).filter((name) => !denied(name))
+      }
+    }
+  }, process.env.HIDE_EXT.toLowerCase().split(',').filter(Boolean))
+  note(`WebGL extensions denied: ${process.env.HIDE_EXT}`)
+}
 const hosts = {}
 const seen = new Map()
 page.on('console', (m) => {
