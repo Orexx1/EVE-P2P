@@ -219,7 +219,8 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
   const modelWait = setTimeout(() => {
     // Taking too long: start on stand-ins. The real hulls still take over if they arrive.
     if (view === standin) canvas.hidden = false
-    hud.setLoad({ mode: 'simple', why: 'Ship models are taking too long. Starting with simple ships.' })
+    report.why = 'Ship models are taking too long. Starting with simple ships; the real ones take over when they arrive.'
+    hud.setLoad({ mode: 'simple', why: report.why as string })
     settle()
   }, MODEL_WAIT_MS)
 
@@ -231,31 +232,36 @@ export function launchArena(session: Session, onExit: (reason: string | null) =>
       .then(({ ModelView }) => ModelView.load(dnas as string[], rig, (progress) => hud.setLoad({ mode: 'models', ...progress })))
       .then((models) => {
         if (closed) return
-        const backToStandins = (remember: boolean) => {
+        const backToStandins = (remember: boolean, state: string, why: string) => {
           if (closed || view !== models) return
           if (remember) setGraphics({ models: false })
           models.dispose()
           canvas.hidden = false
           view = standin = new SpaceView(canvas, lengths, rig, engines)
           layout()
-          report.models = 'too slow'
+          report.models = state
+          report.why = why
+          hud.setLoad({ mode: 'simple', why })
         }
-        models.onSlow = () => backToStandins(true)
+        models.onSlow = () => backToStandins(true, 'too slow', 'The ship models ran too slowly here. Using simple ships: turn them back on under Graphics.')
+        models.onBroken = (why) => backToStandins(false, 'broken', `${why} Using simple ships.`)
         models.attach(root)
         standin?.dispose()
         standin = null
         canvas.hidden = true
         view = models
         report.models = 'ready'
+        report.why = ''
         hud.setLoad({ mode: 'models', engine: 100, hulls: dnas.map(() => 100), overall: 100 })
         settle()
       })
       .catch((err) => {
         report.models = 'failed'
-        report.error = String(err instanceof Error ? err.message : err)
+        report.error = String(err instanceof Error ? `${err.name}: ${err.message}` : err).slice(0, 300)
+        report.why = 'Ship models could not be loaded. Using simple ships.'
         console.warn('Real ship models are unavailable; using stand-in hulls.', err)
         canvas.hidden = false
-        hud.setLoad({ mode: 'simple', why: 'Ship models could not be loaded. Using simple ships.' })
+        hud.setLoad({ mode: 'simple', why: report.why as string })
         settle()
       })
   } else {

@@ -616,8 +616,9 @@ export class Hud {
   setLoad(state: LoadState) {
     this.load = state
     // Hulls that arrive after the fight has begun are reported in the top bar instead.
+    // So is the reason the real models are not in use, when there is one: it must not vanish with the start-up screen.
     this.el.loading.textContent =
-      this.session.started && state.mode === 'models' && state.overall < 100 ? `Loading ship models, ${state.overall}%` : ''
+      state.mode === 'simple' ? (state.why ? 'Simple ships: see Graphics' : '') : this.session.started && state.overall < 100 ? `Loading ship models, ${state.overall}%` : ''
     this.drawBoot()
   }
 

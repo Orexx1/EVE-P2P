@@ -166,8 +166,28 @@ try {
     await sleep(8000)
     note(`drone window after Recall: ${JSON.stringify(await craftWindow())}`)
   }
+  note(`picture check: ${JSON.stringify(await page.evaluate(() => ({ lit: window.__arena?.lit, models: window.__arena?.models, why: window.__arena?.why })))}`)
   note(`overview: ${await page.evaluate(() => [...document.querySelectorAll('.overview tbody tr')].map((e) => e.className.split(' ')[0] + ' ' + e.textContent.trim().replace(/\s+/g, ' ')).join(' | '))}`)
   note(`hud: ${await page.evaluate(() => [document.querySelector('[data-el="layers"]')?.textContent, document.querySelector('[data-el="selRange"]')?.textContent, ...[...document.querySelectorAll('.combat-log li')].map((l) => l.textContent)].join(' | '))}`)
+  // LOSE=1 takes the graphics context away mid-fight, as a phone short of memory does:
+  // the fight must carry on with simple ships and say why.
+  if (state === 'ready' && process.env.LOSE) {
+    await page.evaluate(() => document.querySelector('canvas.model-canvas').getContext('webgl2').getExtension('WEBGL_lose_context').loseContext())
+    await sleep(1500)
+    const after = await page.evaluate(() => ({
+      models: window.__arena?.models,
+      why: window.__arena?.why,
+      standin: document.querySelector('canvas.standin')?.hidden === false,
+      notice: document.querySelector('[data-el="loading"]')?.textContent,
+    }))
+    note(`after losing the graphics context: ${JSON.stringify(after)}`)
+    await shoot('context-lost')
+    // The report a player would copy.
+    await page.click('.arena [data-act="graphics"]').catch(() => {})
+    note(`graphics report: ${await page.evaluate(() => { const d = document.querySelector('.gfx-report'); if (d) d.open = true; return document.querySelector('[data-gfx="report"]')?.textContent?.replace(/\n/g, ' // ') })}`)
+    state = after.models === 'broken' && after.standin ? 'ready' : 'context loss not handled'
+    if (state === 'ready') state = 'done'
+  }
   if (state === 'ready') {
     // Zoom out with the mouse wheel to see both ships and the backdrop.
     await page.mouse.move(300, 150)
@@ -206,4 +226,4 @@ for (const [name, data] of shots) {
 
 await browser.close()
 server.close()
-process.exit(state === 'ready' ? 0 : 1)
+process.exit(state === 'ready' || state === 'done' ? 0 : 1)

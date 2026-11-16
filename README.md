@@ -103,6 +103,13 @@ The screen is laid out the way the game's is, so a pilot knows where to look.
   jammers, painters, dampeners and tracking disruptors, and a shimmer round a
   ship that is repairing armor, boosting shields or patching hull. Both pilots
   see all of them, as they would on grid.
+- **When the real ships do not appear.** The fight carries on with simple ships
+  and says so in the top bar. The Graphics panel has a report of what the device
+  can draw and what went wrong, with a button to copy it. A device that loses
+  its graphics context, or loads the models and then draws nothing but black,
+  is put back on simple ships instead of being left with an empty screen. A
+  phone starts with half-size textures, and quarter-size if it cannot read the
+  game's compressed textures.
 - **Folding windows.** Tap the title strip of the selected item, the overview or
   the drone window, or the Log tab, to fold it down to that strip; tap again to
   bring it back. Folded, the selected item still shows its name and range, the

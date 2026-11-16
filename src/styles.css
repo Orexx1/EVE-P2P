@@ -802,6 +802,39 @@ dl.inline > div {
   font-size: 0.8125rem;
 }
 
+/* What this device can draw, as text to copy and send when the real ships do not appear. */
+.gfx-report {
+  grid-column: 1 / -1;
+  font-size: 0.8125rem;
+}
+
+.gfx-report summary {
+  cursor: pointer;
+  padding: 0.25rem 0;
+  color: var(--muted);
+}
+
+.gfx-report .gfx-note {
+  margin: 0.25rem 0;
+  color: var(--muted);
+}
+
+.gfx-report pre {
+  max-height: 11rem;
+  margin: 0 0 0.5rem;
+  padding: 0.5rem;
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 /* Extra ships: search, add to a side, see who is on each. */
 .roster {
   margin-bottom: 0.875rem;

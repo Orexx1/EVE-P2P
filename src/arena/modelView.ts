@@ -34,9 +34,13 @@ interface Stage {
 }
 
 let stage: Promise<Stage> | null = null
+/** Set once this device has shown it cannot draw the real models: they are not tried again this visit. */
+let broken: string | null = null
 
-/** How long each step took, for the automated checks to report. */
-const timings: Record<string, number> = (((window as unknown as { __arena?: Record<string, unknown> }).__arena ??= {}).timings ??= {}) as Record<string, number>
+/** What happened, for the graphics report and the automated checks. */
+const report = ((window as unknown as { __arena?: Record<string, unknown> }).__arena ??= {})
+/** How long each step took. */
+const timings: Record<string, number> = (report.timings ??= {}) as Record<string, number>
 const timed = async <T>(name: string, work: Promise<T>): Promise<T> => {
   const began = performance.now()
   try {
@@ -47,6 +51,7 @@ const timed = async <T>(name: string, work: Promise<T>): Promise<T> => {
 }
 
 function getStage(): Promise<Stage> {
+  if (broken) return Promise.reject(new Error(broken))
   stage ??= boot().catch((err) => {
     stage = null
     throw err
@@ -214,6 +219,12 @@ async function boot(): Promise<Stage> {
   }
   applyResolution()
   onGraphicsChange(applyResolution)
+  // A phone short of graphics memory takes the context away. The engine cannot draw without it,
+  // so whatever fight is showing goes back to simple ships and says why.
+  canvas.addEventListener('webglcontextlost', () => {
+    broken = 'This device ran out of graphics memory for the ship models.'
+    made.active?.onBroken?.(broken)
+  })
   bootStep(80)
   made.scene = await timed('backdrop', tny.FetchScene(BACKDROP))
   bootStep(100)
@@ -231,7 +242,13 @@ export interface ModelProgress {
 export class ModelView implements FightView {
   /** Called if the device cannot keep a usable frame rate with real models. */
   onSlow: (() => void) | null = null
+  /** Called, with the reason, if the device turns out not to draw the real models at all. */
+  onBroken: ((why: string) => void) | null = null
   private latest: ShipView[] | null = null
+  /** How many times the picture has been checked for being nothing but black, and how many times it was. */
+  private looks = 0
+  private blanks = 0
+  private lookAt = 2
   private slowFor = 0
   private shown = 0
   private owed = 0
@@ -301,17 +318,54 @@ export class ModelView implements FightView {
       hull.boosterStrength = ship.thrust
     })
     tny.Render(dt)
+    this.shown += dt
+    this.look()
 
     // A phone that cannot hold 12 frames a second for five seconds goes back
     // to the stand-in view. The first seconds are skipped: shaders are still
     // being translated then. Automated browsers draw in software and are exempt.
-    this.shown += dt
     if (this.shown > 6 && graphics.autoSimplify && !navigator.webdriver) {
       this.slowFor = dt > 1 / 12 ? this.slowFor + dt : 0
       if (this.slowFor > 5) {
         this.slowFor = 0
         this.onSlow?.()
       }
+    }
+  }
+
+  /**
+   * Some graphics chips load everything without complaint and then draw nothing.
+   * For the first seconds of a fight the picture is sampled once a second: space
+   * here is never pure black (the backdrop is a nebula), so a picture that is
+   * black at every sample, every time, means the models are not being drawn.
+   */
+  private look() {
+    if (this.looks >= 8 || this.shown < this.lookAt) return
+    this.lookAt = this.shown + 1
+    try {
+      const gl = tw2.device.gl as WebGL2RenderingContext
+      // Only the finished frame is read, and only if the engine has left it in place to be read.
+      if (gl.getParameter(gl.FRAMEBUFFER_BINDING) !== null) return
+      const w = gl.drawingBufferWidth
+      const h = gl.drawingBufferHeight
+      const pixel = new Uint8Array(4)
+      let lit = 0
+      for (let y = 1; y <= 5; y++) {
+        for (let x = 1; x <= 7; x++) {
+          gl.readPixels(Math.floor((w * x) / 8), Math.floor((h * y) / 6), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel)
+          if (pixel[0] + pixel[1] + pixel[2] > 0) lit++
+        }
+      }
+      this.looks++
+      if (lit === 0) this.blanks++
+      report.lit = lit
+      if (this.looks === 8 && this.blanks === 8) {
+        broken = 'This device loaded the ship models but drew nothing with them.'
+        this.onBroken?.(broken)
+      }
+    } catch {
+      // A device that will not let the picture be read is left alone.
+      this.looks = 8
     }
   }
 
