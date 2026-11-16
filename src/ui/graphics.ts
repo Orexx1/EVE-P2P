@@ -5,6 +5,8 @@
 // quality, shader quality and anti-aliasing are fixed when the model engine
 // starts, which happens once per visit, so those apply after a reload.
 
+import { crashCount, lastCrash, startGuard } from './crashGuard'
+
 export interface Graphics {
   /** Real EVE hulls, or the simple stand-in shapes. */
   models: boolean
@@ -55,10 +57,21 @@ const EXTENSIONS = [
   'KHR_parallel_shader_compile',
 ]
 
+const DEVICE_KEY = 'eve-p2p:device'
 let device: Device | null = null
 export function getDevice(): Device {
   if (device) return device
-  const found: Device = { webgl: 0, renderer: '', maxTexture: 0, extensions: {}, touch: typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches }
+  const touch = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
+  const found: Device = { webgl: 0, renderer: '', maxTexture: 0, extensions: {}, touch }
+  // Looked at once per browser version and remembered: a graphics context is not opened on every visit just to ask.
+  try {
+    const kept = JSON.parse(localStorage.getItem(DEVICE_KEY) ?? 'null') as { ua: string; device: Device } | null
+    if (kept && kept.ua === navigator.userAgent && kept.device?.extensions) return (device = { ...kept.device, touch })
+  } catch {
+    // Nothing remembered.
+  }
+  // A visit that follows a crash at start-up opens nothing it does not have to.
+  if (startGuard()?.during === 'boot') return (device = found)
   try {
     const canvas = document.createElement('canvas')
     const gl = (canvas.getContext('webgl2') ?? canvas.getContext('webgl')) as WebGL2RenderingContext | WebGLRenderingContext | null
@@ -70,6 +83,11 @@ export function getDevice(): Device {
       for (const name of EXTENSIONS) found.extensions[name] = !!gl.getExtension(name)
       // The context was only for looking; give it back at once. Phones allow few.
       gl.getExtension('WEBGL_lose_context')?.loseContext()
+      try {
+        localStorage.setItem(DEVICE_KEY, JSON.stringify({ ua: navigator.userAgent, device: found }))
+      } catch {
+        // Asked again next visit.
+      }
     }
   } catch {
     // No graphics context at all: the report says so.
@@ -118,7 +136,32 @@ export function getGraphics(): Graphics {
   } catch {
     // No storage, or something unreadable in it: defaults.
   }
-  return (current = clean(stored))
+  current = clean(stored)
+  // The last visit was killed while the real models were loading or on screen: this device
+  // cannot afford them as they were set. The first time they go to their lightest; if that
+  // is still too much, they go off. Either can be changed back under Graphics.
+  const crash = startGuard()
+  if (crash?.during === 'models' && current.models && !eased) {
+    eased = true
+    setGraphics(crash.strikes >= 2 ? { models: false } : { textures: 2, antialias: false, resolution: current.resolution === 0 || current.resolution > 1 ? 1 : current.resolution })
+  }
+  return current!
+}
+let eased = false
+
+/** What to tell the player about a crash the last visit ended in, if it did. */
+export function crashNotice(): string {
+  const crash = lastCrash()
+  if (!crash) return ''
+  if (crash.during === 'boot') return 'This page stopped while starting last time, so it has started in its lightest form. If that keeps happening, send the report under Graphics.'
+  return crash.strikes >= 2
+    ? 'The real ship models stopped this page twice running, so they are now off and fights use simple ships. They can be turned back on under Graphics.'
+    : 'The real ship models stopped this page last time, so they are now on their lightest settings. They can be changed back under Graphics.'
+}
+
+/** Whether to start loading ship models before a fight has been asked for. Not on a device that has been killed by them, or straight after a crash. */
+export function mayPreload(): boolean {
+  return !lastCrash() && crashCount().models === 0
 }
 
 export function setGraphics(change: Partial<Graphics>) {
@@ -169,6 +212,8 @@ export function graphicsReport(): string {
   const lines = [
     `Ship models: ${String(arena.models ?? 'not tried yet')}${arena.why ? ` (${String(arena.why)})` : ''}`,
     arena.error ? `Error: ${String(arena.error)}` : '',
+    lastCrash() ? `Last visit: the page was stopped by the browser while ${lastCrash()!.during === 'models' ? 'loading or drawing ship models' : 'starting'}` : '',
+    crashCount().boot || crashCount().models ? `Stops on record: ${crashCount().models} with ship models, ${crashCount().boot} at start` : '',
     arena.lit !== undefined ? `Picture check: ${String(arena.lit)} of 35 points lit` : '',
     arena.timings && Object.keys(arena.timings as object).length ? `Timings (ms): ${JSON.stringify(arena.timings)}` : '',
     `Options: ${JSON.stringify(g)}`,

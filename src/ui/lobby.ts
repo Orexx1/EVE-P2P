@@ -6,7 +6,7 @@ import { SCENARIOS, describeSide, hullOf, pilotFit, scenarioShips, type Scenario
 import { cleanPilot, GuestSession, handshake, HostSession, loadExtras, playerFor, type Extra, type Session, type Setup } from '../game/session'
 import { esc } from './format'
 import { hostRoom, joinRoom, normaliseCode, type HostedRoom } from '../net/room'
-import { getGraphics, mountGraphicsPanel } from './graphics'
+import { getDevice, getGraphics, mayPreload, mountGraphicsPanel } from './graphics'
 import { createRoster } from './roster'
 
 const PILOT_KEY = 'eve-p2p:pilot'
@@ -145,6 +145,21 @@ export function createLobby(host: HTMLElement): Lobby {
   const warm = (...fits: LoadedFit[]) => {
     if (!getGraphics().models) return
     void import('../arena/modelView').then((m) => m.warmShips(fits.map((f) => f.fit.shipTypeID))).catch(() => {})
+  }
+  // Loading ahead is a favour, and the heaviest thing the site does. A phone is not made to do it
+  // just for arriving with a fit remembered from last time: only once the player has touched the
+  // page. A device the models have stopped before is never made to do it ahead of a fight at all.
+  let touched = !getDevice().touch
+  const preload = (fit: LoadedFit) => {
+    if (touched && mayPreload()) warm(fit)
+  }
+  if (!touched) {
+    const first = () => {
+      touched = true
+      window.removeEventListener('pointerdown', first, true)
+      if (current) preload(current.fit)
+    }
+    window.addEventListener('pointerdown', first, true)
   }
 
   const setBusy = (busy: boolean) => buttons().forEach((b) => (b.disabled = busy))
@@ -416,7 +431,7 @@ export function createLobby(host: HTMLElement): Lobby {
     setFit(next) {
       current = next
       roster.setFit(next)
-      if (next) warm(next.fit)
+      if (next) preload(next.fit)
       own.hidden = !next
       noFit.hidden = !!next
       restore()

@@ -11,6 +11,7 @@
 // kept between fights.
 import { RESOURCE_RELAY } from '../config'
 import { dnaFor } from '../data/models'
+import { cleared, hold } from '../ui/crashGuard'
 import { getGraphics, markEngineStarted, onGraphicsChange, pixelRatio } from '../ui/graphics'
 import { FIELD_OF_VIEW, type CameraRig, type FightView, type ShipView } from './rig'
 
@@ -92,6 +93,8 @@ function fetchHull(dna: string): Pending {
   const watcher = () => progress()
   bootWatchers.add(watcher)
   progress()
+  // Starting the engine and unpacking a hull's textures is where a phone runs out of memory.
+  const done = hold('models')
   pending.hull = timed(
     `hull ${dna}`,
     getStage()
@@ -102,7 +105,10 @@ function fetchHull(dna: string): Pending {
         progress(100)
         return hull
       })
-      .finally(() => bootWatchers.delete(watcher)),
+      .finally(() => {
+        bootWatchers.delete(watcher)
+        done()
+      }),
   )
   return pending
 }
@@ -249,6 +255,8 @@ export class ModelView implements FightView {
   private looks = 0
   private blanks = 0
   private lookAt = 2
+  /** Lets go of the mark that says the models are on screen. */
+  private release: (() => void) | null = null
   private slowFor = 0
   private shown = 0
   private owed = 0
@@ -293,6 +301,7 @@ export class ModelView implements FightView {
     }
     root.prepend(s.canvas)
     s.active = this
+    this.release = hold('models')
   }
 
   render(ships: ShipView[]) {
@@ -322,6 +331,8 @@ export class ModelView implements FightView {
     tny.Render(dt)
     this.shown += dt
     this.look()
+    // Half a minute of real models on screen: whatever stopped the page before is not stopping it now.
+    if (this.shown > 30 && this.shown - dt <= 30) cleared('models')
 
     // A phone that cannot hold 12 frames a second for five seconds goes back
     // to the stand-in view. The first seconds are skipped: shaders are still
@@ -377,6 +388,8 @@ export class ModelView implements FightView {
 
   dispose() {
     const s = this.stage
+    this.release?.()
+    this.release = null
     if (s.active !== this) return
     s.active = null
     this.hulls.forEach((hull, i) => {

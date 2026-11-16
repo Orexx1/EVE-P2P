@@ -110,6 +110,17 @@ The screen is laid out the way the game's is, so a pilot knows where to look.
   is put back on simple ships instead of being left with an empty screen. A
   phone starts with half-size textures, and quarter-size if it cannot read the
   game's compressed textures.
+- **When the browser kills the page.** A phone's browser kills a page that asks
+  for more memory than it will give, and after two kills in a row shows "A
+  problem repeatedly occurred" instead of the site. The page cannot catch
+  that, but it leaves a mark in storage while it starts up and while ship
+  models load or are on screen, and a mark found at the next start means the
+  last visit died there. After one such stop the models go to their lightest
+  settings; after a second they go off; a stop during start-up brings the page
+  up without opening a graphics context or working out the remembered fit. Each
+  time the page says what it has done. Closing the page, leaving it or putting
+  it in the background is not counted. A phone no longer starts loading ship
+  models just for arriving with a fit remembered: only once the page is touched.
 - **Folding windows.** Tap the title strip of the selected item, the overview or
   the drone window, or the Log tab, to fold it down to that strip; tap again to
   bring it back. Folded, the selected item still shows its name and range, the

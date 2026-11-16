@@ -4,6 +4,7 @@ import '@fontsource/saira-semi-condensed/600.css'
 import './styles.css'
 import './theme.css'
 import type { FittingDataset } from 'eve-fit-engine'
+import { cleared, hold, startGuard } from './ui/crashGuard'
 import { loadDataset } from './data/dataset'
 import { FitError, loadFit } from './fit/loadFit'
 import { SAMPLE_FITS } from './fit/samples'
@@ -11,8 +12,13 @@ import { squadronDamage } from './game/loadout'
 import { renderFit } from './ui/fitView'
 import { createLobby } from './ui/lobby'
 import { esc } from './ui/format'
+import { crashNotice } from './ui/graphics'
 
 const STORAGE_KEY = 'eve-p2p:last-fit'
+
+// Before anything else: did the last visit die, and in the middle of what?
+const crashed = startGuard()
+const starting = hold('boot')
 
 const app = document.querySelector<HTMLDivElement>('#app')!
 app.innerHTML = `
@@ -25,6 +31,7 @@ app.innerHTML = `
     </p>
   </header>
   <main>
+    <p class="crash-note" id="crashNote" role="status" hidden></p>
     <form class="entry" id="entry">
       <label for="eft">Your fit</label>
       <textarea id="eft" spellcheck="false" autocomplete="off" autocapitalize="off"
@@ -151,6 +158,7 @@ async function start() {
     status.innerHTML = `${esc(err instanceof Error ? err.message : String(err))} <button type="button" class="link" id="retry">Try again</button>`
     status.querySelector('#retry')!.addEventListener('click', start, { once: true })
     dataBar.hidden = true
+    starting()
     return
   }
   status.textContent = ''
@@ -158,8 +166,17 @@ async function start() {
   dataBuild.textContent = `Game data build ${dataset.version}.`
   loadButton.disabled = false
   lobby.setData(dataset)
-  if (textarea.value.trim()) show()
+  // After a crash at start-up the remembered fit waits in the box for a tap, and is not worked out unasked.
+  if (textarea.value.trim() && crashed?.during !== 'boot') show()
+  // Up and quiet for a few seconds: the page has started, whatever stopped it before.
+  setTimeout(() => {
+    starting()
+    cleared('boot')
+  }, 4_000)
 }
 
+const crashNote = app.querySelector<HTMLElement>('#crashNote')!
+crashNote.textContent = crashNotice()
+crashNote.hidden = !crashNote.textContent
 textarea.value = recall()
 void start()

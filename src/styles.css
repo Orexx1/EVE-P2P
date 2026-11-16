@@ -802,6 +802,16 @@ dl.inline > div {
   font-size: 0.8125rem;
 }
 
+/* Said once, at the top, when the last visit was stopped by the browser and this one has gone easier. */
+.crash-note {
+  margin: 0 0 1rem;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--warn);
+  border-radius: 4px;
+  color: var(--warn);
+  font-size: 0.875rem;
+}
+
 /* What this device can draw, as text to copy and send when the real ships do not appear. */
 .gfx-report {
   grid-column: 1 / -1;

@@ -11,6 +11,8 @@ on:
       - 'scripts/build-res-index.mjs'
       - 'scripts/fetch-ccpwgl2.mjs'
       - 'src/arena/**'
+      - 'src/ui/crashGuard.ts'
+      - 'src/ui/graphics.ts'
       - 'worker/**'
       - '.github/workflows/model-smoke.yml'
   workflow_dispatch:
@@ -115,3 +117,26 @@ jobs:
         with:
           name: fight-smoke
           path: /tmp/fight-out
+
+  # Kills the page for real while the ship models load, as a phone's browser does when
+  # it runs out of memory, and checks that the next visit goes easier and says so.
+  killed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Install headless Chrome driver
+        run: cd scripts/site-smoke && npm init -y >/dev/null && npm install --no-audit --no-fund puppeteer
+      - name: Kill the page while models load, twice
+        run: node scripts/site-smoke/crash.mjs "$PWD/dist" /tmp/killed-out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: killed
+          path: /tmp/killed-out
