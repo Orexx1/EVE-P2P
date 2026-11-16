@@ -273,12 +273,19 @@ export function mountGraphicsPanel(host: HTMLElement): () => void {
     if (details.classList?.contains('gfx-report') && details.open) details.querySelector<HTMLElement>('[data-gfx="report"]')!.textContent = graphicsReport()
   }
   host.addEventListener('toggle', toggle, true)
+  // An open report keeps up with the fight: models arriving, failing, or being given up on.
+  const fresh = setInterval(() => {
+    const shown = host.querySelector<HTMLElement>('.gfx-report[open] [data-gfx="report"]')
+    const text = shown ? graphicsReport() : ''
+    if (shown && shown.textContent !== text) shown.textContent = text
+  }, 2_000)
   host.addEventListener('change', change)
   host.addEventListener('click', click)
   const stop = onGraphicsChange(draw)
   draw()
   return () => {
     stop()
+    clearInterval(fresh)
     host.removeEventListener('change', change)
     host.removeEventListener('click', click)
     host.removeEventListener('toggle', toggle, true)

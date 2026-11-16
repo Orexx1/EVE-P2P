@@ -303,6 +303,8 @@ export class ModelView implements FightView {
   frame(dt: number) {
     const ships = this.latest
     if (!ships) return
+    // The context can be gone a frame before the page is told. There is nothing to draw with.
+    if (tw2.device.gl?.isContextLost?.()) return
     // A frame-rate limit draws only when enough time has built up.
     const graphics = getGraphics()
     this.owed += dt

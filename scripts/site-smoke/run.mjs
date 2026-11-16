@@ -184,7 +184,9 @@ try {
     await shoot('context-lost')
     // The report a player would copy.
     await page.click('.arena [data-act="graphics"]').catch(() => {})
-    note(`graphics report: ${await page.evaluate(() => { const d = document.querySelector('.gfx-report'); if (d) d.open = true; return document.querySelector('[data-gfx="report"]')?.textContent?.replace(/\n/g, ' // ') })}`)
+    await page.evaluate(() => { const d = document.querySelector('.arena .gfx-report'); if (d) d.open = true })
+    await sleep(2500)
+    note(`graphics report: ${await page.evaluate(() => document.querySelector('.arena [data-gfx="report"]')?.textContent?.replace(/\n/g, ' // '))}`)
     state = after.models === 'broken' && after.standin ? 'ready' : 'context loss not handled'
     if (state === 'ready') state = 'done'
   }
